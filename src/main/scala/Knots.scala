@@ -1,18 +1,18 @@
 object Knots {
-  trait KnotEnd[A] {
+  trait Self[A] {
     def self: A
   }
 
-  inline def self[A](using knotEnd: KnotEnd[A]): A = knotEnd.self
+  inline def self[A](using knotEnd: Self[A]): A = knotEnd.self
 
-  type Knot[A] = KnotEnd[A] ?=> A
+  type Overridable[A] = Self[A] ?=> A
 
-  object Knot {
-    inline def apply[A](f: KnotEnd[A] ?=> A): Knot[A] = f
+  object Overridable {
+    inline def apply[A](f: Self[A] ?=> A): Overridable[A] = f
 
-    def tie[A](knot: Knot[A]): A = {
+    def build[A](knot: Overridable[A]): A = {
       var r: A | Null = null
-      r = knot(using new KnotEnd[A] {
+      r = knot(using new Self[A] {
         override def self: A = r match {
           case null => throw new IllegalStateException("cannot evaluate untied knot")
           case a: A @unchecked => a
@@ -21,24 +21,24 @@ object Knots {
       r.asInstanceOf[A]
     }
 
-    def layer[A](knot: Knot[A])(lowerKnot: DoubleKnot[A]): Knot[A] = Knot {
-      lowerKnot(using new DoubleKnotEnd[A] {
+    def layer[A](knot: Overridable[A])(lowerKnot: Override[A]): Overridable[A] = Overridable {
+      lowerKnot(using new Super[A] {
         override lazy val upper: A = knot
 
-        override def self: A = summon[KnotEnd[A]].self
+        override def self: A = summon[Self[A]].self
       })
     }
   }
 
-  trait DoubleKnotEnd[A] extends KnotEnd[A] {
+  trait Super[A] extends Self[A] {
     def self: A
 
     def upper: A
   }
 
-  type DoubleKnot[A] = DoubleKnotEnd[A] ?=> A
+  type Override[A] = Super[A] ?=> A
 
-  inline def upper[A](using doubleKnot: DoubleKnotEnd[A]): A = doubleKnot.upper
+  inline def upper[A](using doubleKnot: Super[A]): A = doubleKnot.upper
 
   case class Dependency(name: String)
 
@@ -51,7 +51,7 @@ object Knots {
   }
 
   object MainDependencies {
-    def knot: Knot[MainDependencies] = Knot(new MainDependencies {
+    def knot: Overridable[MainDependencies] = Overridable(new MainDependencies {
       def dep1: Dependency = Dependency("base1")
 
       def dep2: Dependency = Dependency("base2")
@@ -62,7 +62,7 @@ object Knots {
       }
     })
 
-    class Delegate(using DoubleKnotEnd[MainDependencies]) extends MainDependencies {
+    class Delegate(using Super[MainDependencies]) extends MainDependencies {
       override def dep1: Dependency = upper.dep1
 
       override def dep2: Dependency = upper.dep2
@@ -70,7 +70,7 @@ object Knots {
       override def dep3: Dependency = upper.dep3
     }
 
-    def apply(): MainDependencies = Knot.tie(knot)
+    def apply(): MainDependencies = Overridable.build(knot)
   }
 
   def main(args: Array[String]): Unit = {
@@ -79,7 +79,7 @@ object Knots {
     println("base.dep2 " ++ base.dep2.toString)
     println("base.dep3 " ++ base.dep3.toString)
 
-    val decorated = Knot.tie(Knot.layer(MainDependencies.knot)(new MainDependencies.Delegate {
+    val decorated = Overridable.build(Overridable.layer(MainDependencies.knot)(new MainDependencies.Delegate {
       override def dep2: Dependency = {
         println(s"dep2 initialized using ${self.dep1}")
         new Dependency("overridden2")
