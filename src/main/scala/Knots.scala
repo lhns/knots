@@ -23,8 +23,8 @@ object Knots {
   }
 
   inline def self[A](using self: Self[A]): A = self.self
-
-  type WithSelf[Alg[_[_]]] = [A] =>> Self[Alg[Id]] ?=> A
+  
+  type WithSelf[Alg[_[_]]] = [A] =>> Self[WithSelf[Alg]] ?=> A
   type Dep[Alg[_[_]]] = Alg[WithSelf[Alg]]
 
   val evalK: Eval ~> Id = new (Eval ~> Id) {
