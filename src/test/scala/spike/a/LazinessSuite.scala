@@ -96,8 +96,8 @@ class LazinessSuite extends munit.FunSuite {
 
   test("a 23-field override (TupleXXL) stays per field lazy") {
     val base = Overridable[W23](
-      ((f0 = 0, f1 = 1, f2 = 2, f3 = 3, f4 = 4, f5 = 5, f6 = 6, f7 = 7, f8 = 8, f9 = 9, f10 = 10, f11 = 11): Part[W23, P1]) ++
-        ((f12 = 12, f13 = 13, f14 = 14, f15 = 15, f16 = 16, f17 = 17, f18 = 18, f19 = 19, f20 = 20, f21 = 21, f22 = 22): Part[W23, P2]))
+      Overridable.part[W23, P1]((f0 = 0, f1 = 1, f2 = 2, f3 = 3, f4 = 4, f5 = 5, f6 = 6, f7 = 7, f8 = 8, f9 = 9, f10 = 10, f11 = 11)) ++
+        Overridable.part[W23, P2]((f12 = 12, f13 = 13, f14 = 14, f15 = 15, f16 = 16, f17 = 17, f18 = 18, f19 = 19, f20 = 20, f21 = 21, f22 = 22)))
     val effects = AtomicInteger()
     val v = Overridable.build(
       base,
@@ -130,8 +130,8 @@ class LazinessSuite extends munit.FunSuite {
   test("a 23-field base from two parts: per field lazy, self across parts") {
     val effects = AtomicInteger()
     val v = Overridable.build(Overridable[W23](
-      ((f0 = { effects.incrementAndGet(); self.f22 + 1 }, f1 = 1, f2 = 2, f3 = 3, f4 = 4, f5 = 5, f6 = 6, f7 = 7, f8 = 8, f9 = 9, f10 = 10, f11 = 11): Part[W23, P1]) ++
-        ((f12 = 12, f13 = 13, f14 = 14, f15 = 15, f16 = 16, f17 = 17, f18 = 18, f19 = 19, f20 = 20, f21 = 21, f22 = { effects.incrementAndGet(); self.f1 + 100 }): Part[W23, P2])),
+      Overridable.part[W23, P1]((f0 = { effects.incrementAndGet(); self.f22 + 1 }, f1 = 1, f2 = 2, f3 = 3, f4 = 4, f5 = 5, f6 = 6, f7 = 7, f8 = 8, f9 = 9, f10 = 10, f11 = 11)) ++
+        Overridable.part[W23, P2]((f12 = 12, f13 = 13, f14 = 14, f15 = 15, f16 = 16, f17 = 17, f18 = 18, f19 = 19, f20 = 20, f21 = 21, f22 = { effects.incrementAndGet(); self.f1 + 100 }))),
       Override[W23]((f1 = 5)))
     assertEquals(v.f11, 11)
     assertEquals(effects.get, 0)

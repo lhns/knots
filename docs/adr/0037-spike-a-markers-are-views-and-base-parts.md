@@ -10,7 +10,7 @@ The base literal's expected type used a match type (`BaseField`, 0033) to accept
 
 ## Decision
 
-`Module[S] extends View[S]`, so a marker fits its field's own type and `Defs[F]` is a plain `NamedTuple.Map[F, [X] =>> Self[F] ?=> X]`; the match types are gone. The `module` overload for an `Override` requires `Upper`, so it doesn't compile in a base. A base over 22 fields is written as parts ascribed with `Part[F, P]` (the fields P of F, deferred with `Self[F]`) and joined with `++`; `Defs[F] = Part[F, F]`.
+`Module[S] extends View[S]`, so a marker fits its field's own type and `Defs[F]` is a plain `NamedTuple.Map[F, [X] =>> Self[F] ?=> X]`; the match types are gone. The `module` overload for an `Override` requires `Upper`, so it doesn't compile in a base. A base over 22 fields is written as parts, `Overridable.part[F, P]((...))`, joined with `++`. `part` returns its argument; its parameter type `Part[F, P]` (the fields P of F, deferred with `Self[F]`) gives each field its expected type, which `++` alone doesn't. `Defs[F] = Part[F, F]`.
 
 ## Consequences
 

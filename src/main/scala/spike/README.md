@@ -54,7 +54,7 @@ reserved field names (`selectDynamic`, `toTuple`, ...), while `Partial`/`SubsetO
   splits an override literal into one deferred function per field (ADR 0035).
 - Cons:
   - A base literal over 22 fields doesn't get per-field types (a compiler limit), so a larger base is
-    written in parts of at most 22 fields: `((...): Part[Deps, P1]) ++ ((...): Part[Deps, P2])` with
+    written in parts of at most 22 fields: `Overridable.part[Deps, P1]((...)) ++ Overridable.part[Deps, P2]((...))` with
     `type Deps = NamedTuple.Concat[P1, P2]` (ADR 0037). Overrides of any size work as one literal.
   - An override given as a value (a variable, `++`) instead of a literal is evaluated as a whole.
   - `self.x` and the built object rely on IDE support for `Selectable`.

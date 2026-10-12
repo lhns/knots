@@ -29,9 +29,10 @@ inline def upper[F <: AnyNamedTuple](using s: Upper[F]): View[F] = s.upper
 type Defs[F <: AnyNamedTuple] = Part[F, F]
 
 // The fields P of F, each deferred like a field of Defs[F]. A base literal over 22 fields doesn't get
-// per-field types, so ascribe parts and join them with `++` (fields stay lazy, self sees all of Deps):
+// per-field types, so write parts with Overridable.part and join them with `++` (fields stay lazy,
+// self sees all of Deps):
 //   type Deps = NamedTuple.Concat[P1, P2]
-//   Overridable[Deps](((f1 = ..., ...): Part[Deps, P1]) ++ ((f13 = ..., ...): Part[Deps, P2]))
+//   Overridable[Deps](Overridable.part[Deps, P1]((f1 = ..., ...)) ++ Overridable.part[Deps, P2]((f13 = ..., ...)))
 type Part[F <: AnyNamedTuple, P <: AnyNamedTuple] = NamedTuple.Map[P, [X] =>> Self[F] ?=> X]
 
 // The fields of F, each computed on first access (`view.dep2`), also while the knot is being tied.
@@ -107,6 +108,10 @@ private[a] enum Knot[F <: AnyNamedTuple] {
 }
 
 object Overridable {
+  // A part of a base over 22 fields (see Part). Returns its argument; the parameter type is what
+  // defers each field.
+  def part[F <: AnyNamedTuple, P <: AnyNamedTuple](fields: Part[F, P]): Part[F, P] = fields
+
   inline def apply[F <: AnyNamedTuple](defs: Defs[F]): Overridable[F] = {
     rejectReservedNames[F]
     val fns = defs.toTuple.toList.map(f => (s: Self[F]) => f.asInstanceOf[Self[F] ?=> Any](using s))
