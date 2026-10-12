@@ -14,4 +14,4 @@ Keep two types with `Overridable[A] <: Override[A]` (follows from `Upper[A] <: S
 
 ## Consequences
 
-Applies to all spikes (spike A since commit after 0a44252, with ordinary classes instead of opaque types). `build(o1 |+| o2)` and `upper` in a base are compile errors. Merging or reversing would have turned both into runtime cycle errors.
+Applies to all spikes (spike A since d9ea364, with ordinary classes instead of opaque types). `build(o1 |+| o2)` and `upper` in a base are compile errors. Merging or reversing would have turned both into runtime cycle errors.

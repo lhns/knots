@@ -138,6 +138,13 @@ and `upper`, and each field computation gets its own copy. Object-literal member
   - More generated code than D.
 - Kept for comparison; it receives the same fixes as D.
 
+## Tests
+
+Each spike has an munit suite in `src/test/scala/spike/<x>/`: compile errors (`compileErrors`),
+laziness and compute-once, late binding and `upper`, `|+|` laws, cycles (also entered from several
+threads at once), and modules. Run all with `sbt test` on JDK 25+ (472 tests). Spike E's
+`LimitsSuite` pins its documented limits; the ones that would hang are ignored with the reason.
+
 ## What they have in common
 
 - `Self`/`Upper`, the `self`/`upper` accessors, and the inheritance names (ADRs 0002, 0003).
