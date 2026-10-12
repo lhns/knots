@@ -210,8 +210,8 @@ object Macros {
       if !cell.exists then List(DefDef(get, argss => Some(compute(f, argss).changeOwner(get))))
       else resultType(f.memberType).asType match {
         case '[t] => List(
-          ValDef(cell, Some('{ new Cell(${ Expr(f.name) }) }.asTerm.changeOwner(cell))),
-          DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell] }.get(${ compute(f, Nil).asExprOf[Any] }).asInstanceOf[t] }.asTerm.changeOwner(get))))
+          ValDef(cell, Some('{ new Cell(${ Expr(f.name) }, () => ${ compute(f, Nil).asExprOf[Any] }) }.asTerm.changeOwner(cell))),
+          DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell] }.get.asInstanceOf[t] }.asTerm.changeOwner(get))))
       }
     }
     val dispatchDef = Option.when(isView) {
