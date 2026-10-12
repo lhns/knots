@@ -33,6 +33,13 @@ object Overridable {
   inline def apply[A](inline o: Self[A] ?=> Any): Overridable[A] =
     s => Macros.derive[A, Self[A]](o, s, isBase = true)
 
+  // A module: a field whose type is a dependency trait of its own (`db: DbDeps`), supplied with that
+  // trait's layer (`db = DbModule.base(...)`). The layer runs focused through the field: its `self`
+  // is the root's final `db`, so late binding works through the whole tree. In a base there is no
+  // layer below, so the module must be complete (see Override.focus for overrides).
+  def focus[A, B](ctx: Self[A], get: A => B, module: Overridable[B]): B =
+    module(new Self[B] { def self: B = get(ctx.self) })
+
   // Layering on a base keeps it a base (it still needs no upper); Override's monoid alone
   // would widen the result to Override.
   extension [A](base: Overridable[A]) def |+|(ovr: Override[A]): Overridable[A] = layer(base, ovr)
@@ -54,6 +61,14 @@ object Override {
   // `o` defines only the overridden members (`new { ... }`, `(dep2 = ...)`); the rest come from `upper`.
   inline def apply[A](inline o: Upper[A] ?=> Any): Override[A] =
     s => Macros.derive[A, Upper[A]](o, s, isBase = false)
+
+  // A module in an override (see Overridable.focus): its `upper` is the `db` of the layer below, so
+  // `db = Override[DbDeps](...)` is a deep override and `db = DbModule.base(...)` replaces the module.
+  def focus[A, B](ctx: Upper[A], get: A => B, module: Override[B]): B =
+    module(new Upper[B] {
+      def self: B = get(ctx.self)
+      def upper: B = get(ctx.upper)
+    })
 
   // `x |+| y` is y extending x: y's `upper` (its super) is x's result. `empty` passes `upper` through.
   // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit

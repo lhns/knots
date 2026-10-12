@@ -149,12 +149,23 @@ object Macros {
     // --- Checks: report every problem, but don't generate code from a mismatching argument. ---
 
     val byName = fields.map(f => f.name -> f).toMap
+    // A field can also be supplied with a layer of its own type: a module (see Overridable.focus). A base has
+    // no layer below, so it needs a complete Overridable there.
+    def layerOf(layer: TypeRepr, t: TypeRepr) = layer.appliedTo(t)
+    val modules = supplied.collect {
+      case (name, (actual, _, _)) if byName.get(name).exists(f => !(actual <:< resultType(f.memberType)) &&
+        actual <:< layerOf(TypeRepr.of[Override], resultType(f.memberType))) => name
+    }.toSet
     val problems = supplied.toList.flatMap { case (name, (actual, pos, _)) =>
       byName.get(name) match {
         case None => Some((s"$name is not a member of ${target.show}", pos))
         case Some(f) =>
           val required = resultType(f.memberType)
-          Option.when(!(actual <:< required))((s"$name has type ${actual.show}, expected ${required.show}", pos))
+          if modules(name) then
+            Option.when(isBase && !(actual <:< layerOf(TypeRepr.of[Overridable], required)))(
+              (s"$name: a base needs an Overridable[${required.show}], there is no layer below to override", pos))
+          else Option.when(!(actual <:< required))(
+            (s"$name has type ${actual.show}, expected ${required.show} (or an Overridable/Override of it)", pos))
       }
     }
     val missing = fields.filter(f => isBase && f.requiredInBase && !supplied.contains(f.name)).map(_.name)
@@ -189,18 +200,31 @@ object Macros {
     def context(path: Term): Term =
       if isBase then '{ Tag.self(${ s.asExprOf[Self[A]] }, ${ path.asExprOf[List[Cell]] }) }.asTerm
       else '{ Tag.upper(${ s.asExprOf[Upper[A]] }, ${ path.asExprOf[List[Cell]] }) }.asTerm
-    def compute(source: Source, path: Term): Term = source match {
-      case Source.Expression(term) => withContext(term, context(path))
-      case Source.FromValue(read) => read(context(path))
+    def compute(f: Field, source: Source, path: Term): Term = {
+      val ctx = context(path)
+      val value = source match {
+        case Source.Expression(term) => withContext(term, ctx)
+        case Source.FromValue(read) => read(ctx)
+      }
+      if modules(f.name) then module(f, ctx, value) else value
+    }
+    // A module's layer run focused through its field (see Overridable.focus).
+    def module(f: Field, ctx: Term, layer: Term): Term = resultType(f.memberType).asType match {
+      case '[t] =>
+        val get = Lambda(owner, MethodType(List("root"))(_ => List(target), _ => TypeRepr.of[t]),
+          (meth, params) => f.fromUpper(params.head.asInstanceOf[Term], Nil).changeOwner(meth)).asExprOf[A => t]
+        if isBase then '{ Overridable.focus[A, t](${ ctx.asExprOf[Self[A]] }, $get, ${ layer.asExprOf[Overridable[t]] }) }.asTerm
+        else '{ Override.focus[A, t](${ ctx.asExprOf[Upper[A]] }, $get, ${ layer.asExprOf[Override[t]] }) }.asTerm
     }
     def fieldBody(f: Field, argss: List[List[Tree]]): Term = supplied.get(f.name) match {
       case Some((_, _, source)) if cellIndex.contains(f.name) =>
         val fn = Lambda(owner, MethodType(List("path"))(_ => List(pathType), _ => TypeRepr.of[Any]),
-          (meth, params) => compute(source, params.head.asInstanceOf[Term]).changeOwner(meth))
+          (meth, params) => compute(f, source, params.head.asInstanceOf[Term]).changeOwner(meth))
+        // Re-tagged on read: a cached module object would otherwise lose the path at the boundary.
         resultType(f.memberType).asType match {
-          case '[t] => '{ $slot.cells(${ Expr(cellIndex(f.name)) }).get($slot.path)(${ fn.asExprOf[List[Cell] => Any] }).asInstanceOf[t] }.asTerm
+          case '[t] => '{ Tag[Any]($slot.cells(${ Expr(cellIndex(f.name)) }).get($slot.path)(${ fn.asExprOf[List[Cell] => Any] }), $slot.path).asInstanceOf[t] }.asTerm
         }
-      case Some((_, _, source)) => applyArgs(compute(source, '{ $slot.path }.asTerm), argss)
+      case Some((_, _, source)) => applyArgs(compute(f, source, '{ $slot.path }.asTerm), argss)
       case None => f.fromUpper('{ Tag(${ s.asExprOf[Upper[A]] }.upper, $slot.path) }.asTerm, argss)
     }
     // A new instance of the generated class with the given path and cells.
