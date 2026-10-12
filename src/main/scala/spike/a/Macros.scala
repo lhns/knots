@@ -3,18 +3,17 @@ package spike.a
 import scala.NamedTuple.AnyNamedTuple
 import scala.quoted.*
 
-// Splits a literal `(dep2 = ..., dep3 = ...)` into one closure `C => Any` per field, where C is the
-// context the literal is written in (`Self[F]` for a base, `Upper[F]` for an override). A field is
-// computed on its own (Split.perField) and the fields of one literal can use each other via `self`.
-// The argument is typed as one context function, but its element expressions are separate trees
-// inside the lambda: each is moved into a closure with the lambda's parameter replaced by the
-// closure's. Anything that is not a literal (a named-tuple value, `++`, a variable) is evaluated as
-// a whole instead (Split.whole). The literal is recognized as in spike D.
+// Splits an override literal `(dep2 = ..., dep3 = ...)` into one closure `Upper[F] => Any` per field,
+// so a field is computed on its own (Layer.perField) and the fields of one override can use each
+// other via `self`. The argument is typed as one context function, but its element expressions are
+// separate trees inside the lambda: each is moved into a closure with the lambda's parameter replaced
+// by the closure's. Anything that is not a literal (a named-tuple value, `++`, a variable) is
+// evaluated as a whole instead (Layer.whole). The literal is recognized as in spike D.
 object Macros {
-  inline def split[C, O <: AnyNamedTuple](inline o: C ?=> O): Split[C] =
-    ${ splitImpl[C, O]('o) }
+  inline def layer[F <: AnyNamedTuple, O <: AnyNamedTuple](inline o: Upper[F] ?=> O): Layer[F] =
+    ${ layerImpl[F, O]('o) }
 
-  private def splitImpl[C: Type, O <: AnyNamedTuple: Type](o: Expr[C ?=> O])(using Quotes): Expr[Split[C]] = {
+  private def layerImpl[F <: AnyNamedTuple: Type, O <: AnyNamedTuple: Type](o: Expr[Upper[F] ?=> O])(using Quotes): Expr[Layer[F]] = {
     import quotes.reflect.*
 
     def strip(t: Term): Term = t match {
@@ -89,7 +88,7 @@ object Macros {
       }
     }
 
-    val whole = '{ Split.whole[C](fieldNames[O], u => $o(using u).asInstanceOf[Product]) }
+    val whole = '{ Layer.whole[F](fieldNames[O], u => $o(using u).asInstanceOf[Product]) }
 
     strip(o.asTerm) match {
       case Block(List(DefDef(_, List(TermParamClause(List(p))), _, Some(body))), _: Closure) =>
@@ -103,7 +102,7 @@ object Macros {
             report.errorAndAbort("statements before the named tuple are not supported; put them inside the fields", stat.pos)
           case Some((names, Right(elements))) =>
             val closures = elements.map { e =>
-              Lambda(Symbol.spliceOwner, MethodType(List("u"))(_ => List(TypeRepr.of[C]), _ => TypeRepr.of[Any]), (meth, params) => {
+              Lambda(Symbol.spliceOwner, MethodType(List("u"))(_ => List(TypeRepr.of[Upper[F]]), _ => TypeRepr.of[Any]), (meth, params) => {
                 val u = params.head.asInstanceOf[Term]
                 val moved = new TreeMap {
                   override def transformTerm(t: Term)(owner: Symbol): Term = t match {
@@ -112,9 +111,9 @@ object Macros {
                   }
                 }.transformTerm(e)(meth)
                 Typed(moved, TypeTree.of[Any]).changeOwner(meth)
-              }).asExprOf[C => Any]
+              }).asExprOf[Upper[F] => Any]
             }
-            '{ Split.perField[C](${ Expr(names) }, ${ Expr.ofList(closures) }) }
+            '{ Layer.perField[F](${ Expr(names) }, ${ Expr.ofList(closures) }) }
           case None => whole
         }
       case _ => whole

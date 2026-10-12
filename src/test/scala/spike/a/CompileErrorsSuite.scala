@@ -15,16 +15,7 @@ class CompileErrorsSuite extends munit.FunSuite {
   }
 
   test("base missing a field") {
-    assertMentions(compileErrors("""Overridable[Deps]((dep1 = Dep("1"), dep2 = Dep("2")))"""), "missing fields: dep3")
-  }
-
-  test("base missing several fields names them all") {
-    assertMentions(compileErrors("""Overridable[Deps]((dep2 = Dep("2")))"""), "missing fields: dep1, dep3")
-  }
-
-  test("base with an unknown field or the wrong type") {
-    assertMentions(compileErrors("""Overridable[Deps]((dep1 = Dep("1"), dep2 = Dep("2"), dep3 = Dep("3"), dep9 = Dep("9")))"""), "unknown field: dep9")
-    assertMentions(compileErrors("""Overridable[Deps]((dep1 = Dep("1"), dep2 = "x", dep3 = Dep("3")))"""), "wrong type for field dep2")
+    assertRejected(compileErrors("""Overridable[Deps]((dep1 = Dep("1"), dep2 = Dep("2")))"""))
   }
 
   test("bare field name instead of self.name") {
@@ -53,10 +44,9 @@ class CompileErrorsSuite extends munit.FunSuite {
     assertMentions(compileErrors("""Override[AppDeps]((db = new App().dbBase("u")))"""), "wrap it in module(...)")
   }
 
-  test("raw layer in a base needs module(...)") {
-    assertMentions(compileErrors(
-      """Overridable[AppDeps]((config = AppConfig("x", 1), db = new App().dbBase("u"), server = module(new App().serverBase(???, 1))))"""),
-      "wrap it in module(...)")
+  test("raw layer in a base") {
+    assertRejected(compileErrors(
+      """Overridable[AppDeps]((config = AppConfig("x", 1), db = new App().dbBase("u"), server = module(new App().serverBase(???, 1))))"""))
   }
 
   test("override module in a base") {

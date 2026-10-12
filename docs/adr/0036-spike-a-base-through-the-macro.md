@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-13, commit 8dc1ee1)
+Rejected (2026-10-13): implemented in 8dc1ee1 and reverted. The named-tuple field failure came from the `BaseField` match type, not from the expected type, and routing the base through the macro lost per-field type inference (lambda parameters). The base stays macro-free.
 
 ## Context
 

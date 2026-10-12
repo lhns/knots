@@ -11,18 +11,6 @@ class ModulesSuite extends munit.FunSuite {
   private def fakeDb(wrap: String) = Override[AppDeps]((
     db = module(Override[DbDeps]((transactor = Transactor(wrap + "(" + upper.transactor.url + ")"))))))
 
-  test("a base module field takes a BaseModule and is focused at runtime") {
-    val app = App()
-    val base = Overridable[AppDeps]((
-      config = AppConfig("jdbc:base", 1),
-      db = module(app.dbBase(self.config.dbUrl)),
-      server = module(app.serverBase(self.db.userRepo, self.config.port))))
-    val v = Overridable.build(base, Override[AppDeps]((config = AppConfig("jdbc:late", 2))))
-    assertEquals(v.server.routes.repo.tx.url, "jdbc:late")
-    assertEquals(v.server.port, 2)
-    assertEquals(app.transactors.get, 1)
-  }
-
   test("modules are tied through the tree") {
     val app = App()
     assertEquals(Overridable.build(app.base).server.routes, Routes(UserRepo(Transactor("jdbc:prod"))))
