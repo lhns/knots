@@ -152,30 +152,33 @@ object Macros {
         case '[t] => '{ ${ partialRef.get.asExprOf[Any] }.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }.asTerm
       }
     }
-    def guard(cls: Symbol, name: String, value: Term): Term = value.tpe.widen.asType match {
-      case '[t] => '{ Cycles.guard[t](${ This(cls).asExprOf[AnyRef] }, ${ Expr(name) })(${ value.asExprOf[t] }) }.asTerm
-    }
     def applyArgs(fn: Term, argss: List[List[Tree]]): Term = argss.foldLeft(fn) {
       case (fn, (targ: TypeTree) :: targs) => TypeApply(fn, targ :: targs.map(_.asInstanceOf[TypeTree]))
       case (fn, args) => Apply(fn, args.map(_.asInstanceOf[Term]))
     }
-    def isElement(name: String) = supplied.get(name).exists(_._3.isInstanceOf[Source.Element])
 
-    // Every generated member is a def running through the cycle guard. A named-tuple element is cached
-    // in a private lazy val read inside the guard: with the guard inside the lazy val, re-entry would
-    // wait on the lazy val instead of reaching the guard.
+    // A supplied member without parameters is cached in a Cell, which also detects cycles. Members with
+    // parameters and those forwarded to `upper` are plain forwarders.
+    def isCached(name: String, memberType: TypeRepr) = supplied.contains(name) && (memberType match {
+      case _: MethodType | _: PolyType => false
+      case _ => true
+    })
     def declare(cls: Symbol, name: String, memberType: TypeRepr, flags: Flags): List[Symbol] = {
       val get = Symbol.newMethod(cls, name, memberType, flags, Symbol.noSymbol)
-      if isElement(name) then List(get, Symbol.newVal(cls, s"$name$$cached", resultType(memberType), Flags.Lazy | Flags.Private, Symbol.noSymbol))
-      else List(get)
+      if !isCached(name, memberType) then List(get)
+      else resultType(memberType).asType match {
+        case '[t] => List(get, Symbol.newVal(cls, s"$name$$cell", TypeRepr.of[Cell[t]], Flags.Private, Symbol.noSymbol))
+      }
     }
-    def define(cls: Symbol, name: String, value: List[List[Tree]] => Term): List[Definition] = {
+    def define(cls: Symbol, name: String, tpe: TypeRepr, value: List[List[Tree]] => Term): List[Definition] = {
       val get = cls.declaredMethod(name).head
-      val cached = cls.declaredField(s"$name$$cached")
-      if cached.exists then List(
-        ValDef(cached, Some(value(Nil).changeOwner(cached))),
-        DefDef(get, _ => Some(guard(cls, name, Select(This(cls), cached)).changeOwner(get))))
-      else List(DefDef(get, argss => Some(guard(cls, name, value(argss)).changeOwner(get))))
+      val cell = cls.declaredField(s"$name$$cell")
+      if !cell.exists then List(DefDef(get, argss => Some(value(argss).changeOwner(get))))
+      else tpe.asType match {
+        case '[t] => List(
+          ValDef(cell, Some('{ new Cell[t](${ Expr(name) }) }.asTerm.changeOwner(cell))),
+          DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell[t]] }.get(${ value(Nil).asExprOf[t] }) }.asTerm.changeOwner(get))))
+      }
     }
 
     val parents = List(TypeTree.of[Object], TypeTree.of[A])
@@ -187,7 +190,7 @@ object Macros {
             MethodType(List("name"))(_ => List(TypeRepr.of[String]), _ => TypeRepr.of[Any]), Flags.Override, Symbol.noSymbol),
           selfType = None)
         val members = fs.flatMap { (n, t) =>
-          define(cls, n, _ => supplied.get(n) match {
+          define(cls, n, t, _ => supplied.get(n) match {
             case Some((_, _, source)) => fromSource(source, t)
             case None => t.asType match {
               case '[t] => '{ ${ upper.get.asExprOf[View[?]] }.selectDynamic(${ Expr(n) }).asInstanceOf[t] }.asTerm
@@ -209,7 +212,7 @@ object Macros {
           implemented.flatMap(m => declare(cls, m.name, target.memberType(m), Flags.Override)),
           selfType = None)
         val members = implemented.flatMap { m =>
-          define(cls, m.name, argss => supplied.get(m.name) match {
+          define(cls, m.name, fields(m.name)._1, argss => supplied.get(m.name) match {
             case Some((_, _, source)) => applyArgs(fromSource(source, fields(m.name)._1), argss)
             case None => applyArgs(Select(upper.get, m), argss)
           })

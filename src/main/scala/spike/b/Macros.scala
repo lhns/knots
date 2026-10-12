@@ -83,30 +83,43 @@ object Macros {
     }
 
     // A layer forwards everything it doesn't supply to `upper`; a base keeps A's concrete defaults.
+    // Supplied members without parameters are cached in a Cell, which also detects cycles.
     val upper = Option.when(!isBase)('{ ${ s.asExprOf[Upper[A]] }.upper }.asTerm)
     val implemented = traitMembers.filter(m => supplied.contains(m.name) || !isBase)
+    def isCached(m: Symbol) = supplied.contains(m.name) && (target.memberType(m) match {
+      case _: MethodType | _: PolyType => false
+      case _ => true
+    })
     val parents = List(TypeTree.of[Object], TypeTree.of[A])
-    val cls = Symbol.newClass(owner, "Derived", parents.map(_.tpe),
-      cls => implemented.map(m => Symbol.newMethod(cls, m.name, target.memberType(m), Flags.Override, Symbol.noSymbol)),
+    val cls = Symbol.newClass(owner, "Derived", parents.map(_.tpe), cls =>
+      implemented.flatMap { m =>
+        val get = Symbol.newMethod(cls, m.name, target.memberType(m), Flags.Override, Symbol.noSymbol)
+        val cell = resultType(target.memberType(m)).asType match {
+          case '[t] => Symbol.newVal(cls, s"${m.name}$$cell", TypeRepr.of[Cell[t]], Flags.Private, Symbol.noSymbol)
+        }
+        if isCached(m) then List(get, cell) else List(get)
+      },
       selfType = None)
-    val methods = cls.declaredMethods.map { meth =>
-      DefDef(meth, argss => {
-        val receiver = supplied.get(meth.name) match {
-          case Some(m) => Select(Ref(partial), m)
-          case None => Select(upper.get, member(meth.name).get)
+    val members = implemented.flatMap { m =>
+      val get = cls.declaredMethod(m.name).head
+      val value = (argss: List[List[Tree]]) => argss.foldLeft[Term](supplied.get(m.name) match {
+        case Some(sm) => Select(Ref(partial), sm)
+        case None => Select(upper.get, m)
+      }) {
+        case (fn, (targ: TypeTree) :: targs) => TypeApply(fn, targ :: targs.map(_.asInstanceOf[TypeTree]))
+        case (fn, args) => Apply(fn, args.map(_.asInstanceOf[Term]))
+      }
+      if isCached(m) then {
+        val cell = cls.declaredField(s"${m.name}$$cell")
+        resultType(target.memberType(m)).asType match {
+          case '[t] => List(
+            ValDef(cell, Some('{ new Cell[t](${ Expr(m.name) }) }.asTerm.changeOwner(cell))),
+            DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell[t]] }.get(${ value(Nil).asExprOf[t] }) }.asTerm.changeOwner(get))))
         }
-        val call = argss.foldLeft[Term](receiver) {
-          case (fn, (targ: TypeTree) :: targs) => TypeApply(fn, targ :: targs.map(_.asInstanceOf[TypeTree]))
-          case (fn, args) => Apply(fn, args.map(_.asInstanceOf[Term]))
-        }
-        val guarded = call.tpe.widen.asType match {
-          case '[t] => '{ Cycles.guard[t](${ This(cls).asExprOf[AnyRef] }, ${ Expr(meth.name) })(${ call.asExprOf[t] }) }.asTerm
-        }
-        Some(guarded.changeOwner(meth))
-      })
+      } else List(DefDef(get, argss => Some(value(argss).changeOwner(get))))
     }
     val instance = Typed(Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil), TypeTree.of[A])
     val partialDef = ValDef(partial, Some(construct.changeOwner(partial)))
-    Block(literalClass ++ List(partialDef, ClassDef(cls, parents, methods)), instance).asExprOf[A]
+    Block(literalClass ++ List(partialDef, ClassDef(cls, parents, members)), instance).asExprOf[A]
   }
 }

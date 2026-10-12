@@ -2,6 +2,9 @@ package spike.d
 
 import cats.Monoid
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
+
 import scala.NamedTuple.{AnyNamedTuple, Names}
 import scala.compiletime.constValueTuple
 
@@ -72,27 +75,47 @@ private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
     def self: A = s.self
   })
 
-// Generated members run through `guard`, so a dependency cycle (a member asked for again while it is
-// still being computed on this thread) fails with the path instead of a lazy val waiting on itself.
-object Cycles {
-  private val inProgress = ThreadLocal.withInitial(() => scala.collection.mutable.ArrayBuffer.empty[(AnyRef, String)])
+// The members the current computation is in the middle of, outermost first. A ScopedValue is bound
+// for the extent of a call and seen by everything it calls, without depending on thread identity.
+private val computing: ScopedValue[List[Cell[?]]] = ScopedValue.newInstance()
 
-  def guard[T](layer: AnyRef, member: String)(compute: => T): T = {
-    val stack = inProgress.get
-    val start = stack.indexWhere((l, m) => (l eq layer) && m == member)
-    if start >= 0 then {
-      // A member forwarded through several layers shows up once per layer; show it once.
-      val path = (stack.drop(start).map(_._2) :+ member).foldRight(List.empty[String]) {
-        case (m, next :: rest) if m == next => next :: rest
-        case (m, rest) => m :: rest
-      }
-      throw new IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")
+// Caches one generated member and detects dependency cycles: asking for a member that the current
+// computation is already in the middle of fails with the path, where a lazy val would wait on itself
+// forever. Other callers wait for the value.
+final class Cell[T](val name: String) {
+  private enum State {
+    case Empty
+    case Pending(done: CountDownLatch)
+    case Done(value: T)
+  }
+  private val state = new AtomicReference[State](State.Empty)
+
+  def get(compute: => T): T = {
+    val path = if computing.isBound then computing.get else Nil
+    if path.contains(this) then throw new CycleException(path.dropWhile(_ ne this).map(_.name) :+ name)
+    state.get match {
+      case State.Done(value) => value
+      case State.Pending(done) =>
+        done.await()
+        get(compute)
+      case State.Empty =>
+        val done = new CountDownLatch(1)
+        if !state.compareAndSet(State.Empty, State.Pending(done)) then get(compute)
+        else
+          try {
+            val value = ScopedValue.where(computing, path :+ this).call(() => compute)
+            state.set(State.Done(value))
+            value
+          } catch {
+            case e: Throwable =>
+              state.set(State.Empty)
+              throw e
+          } finally done.countDown()
     }
-    stack += ((layer, member))
-    try compute
-    finally stack.remove(stack.length - 1)
   }
 }
+
+final class CycleException(path: List[String]) extends IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")
 
 // A named tuple's shape as an object whose fields are computed on first access, so `self.dep2`
 // works while the knot is being tied (a tuple can't exist before its fields). As a target:
