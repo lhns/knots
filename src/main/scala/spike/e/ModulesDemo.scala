@@ -2,7 +2,8 @@ package spike.e
 
 import cats.syntax.all.*
 
-// Modules: a field whose type is a dependency trait of its own is supplied with that trait's layer.
+// Modules: a field whose type is a dependency trait of its own is supplied with that trait's layer,
+// wrapped in module(...).
 // A module takes what it needs from outside as (by-name) parameters, wired by the parent.
 object ModulesDemo {
   case class AppConfig(dbUrl: String, port: Int)
@@ -39,15 +40,15 @@ object ModulesDemo {
 
   val app = Overridable[MainDeps]((
     config = AppConfig("jdbc:prod", 8080),
-    db = DbModule.base(self.config.dbUrl),
-    server = ServerModule.base(self.db.userRepo, self.config.port),
+    db = module(DbModule.base(self.config.dbUrl)),
+    server = module(ServerModule.base(self.db.userRepo, self.config.port)),
   ))
 
   def main(args: Array[String]): Unit = {
     println("app: " + Overridable.build(app).server.routes)
     println("config: " + Overridable.build(app, Override[MainDeps]((config = AppConfig("jdbc:test", 9090)))).server.routes)
     // A deep override: only db.transactor changes; server.routes sees it through db.userRepo.
-    val fakeDb = Override[MainDeps]((db = Override[DbDeps]((transactor = Transactor("fake(" + upper.transactor.url + ")")))))
+    val fakeDb = Override[MainDeps]((db = module(Override[DbDeps]((transactor = Transactor("fake(" + upper.transactor.url + ")"))))))
     println("deep override: " + Overridable.build(app, fakeDb).server.routes)
   }
 }
