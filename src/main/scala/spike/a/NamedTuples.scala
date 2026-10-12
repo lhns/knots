@@ -1,8 +1,8 @@
 package spike.a
 
-import scala.NamedTuple.{AnyNamedTuple, DropNames, Names}
+import scala.NamedTuple.{AnyNamedTuple, Names}
 import scala.collection.mutable
-import scala.compiletime.{constValue, constValueTuple, erasedValue, error, summonFrom}
+import scala.compiletime.constValueTuple
 
 trait Self[F <: AnyNamedTuple] {
   def self: View[F]
@@ -26,34 +26,8 @@ final class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable 
   def selectDynamic(name: String): Any = resolve(name)
 }
 
-// The type of field N in F; doesn't reduce if F has no field N.
-type FieldType[F <: AnyNamedTuple, N] = FieldTypeOf[Names[F], DropNames[F], N]
-
-type FieldTypeOf[Ns <: Tuple, Vs <: Tuple, N] <: Any = (Ns, Vs) match {
-  case (N *: _, v *: _) => v
-  case (_ *: ns, _ *: vs) => FieldTypeOf[ns, vs, N]
-}
-
-// Every field of the override (names Ns, types Vs) must exist in F with a conforming type.
-inline def checkOverride[F <: AnyNamedTuple, Ns <: Tuple, Vs <: Tuple]: Unit =
-  inline erasedValue[(Ns, Vs)] match {
-    case _: (EmptyTuple, EmptyTuple) => ()
-    case _: ((n *: ns), (v *: vs)) =>
-      inline if !constValue[Tuple.Contains[Names[F], n]] then
-        error("override field is not in the base: " + constValue[n])
-      else inline if !conforms[v, FieldType[F, n]] then
-        error("override has the wrong type for field " + constValue[n])
-      else checkOverride[F, ns, vs]
-  }
-
-// Separate so V and T are type parameters: lowercase names in a summonFrom pattern would bind fresh types.
-inline def conforms[V, T]: Boolean = summonFrom {
-  case _: (V <:< T) => true
-  case _ => false
-}
-
 // A layer is evaluated as a unit: its fields can't reference each other via `self`.
-final case class Layer[F <: AnyNamedTuple](names: List[String], values: Super[F] => Tuple)
+final case class Layer[F <: AnyNamedTuple](names: List[String], values: Super[F] => Partial[F])
 
 final class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
 
@@ -63,10 +37,9 @@ object Override {
 }
 
 final class OverrideBuilder[F <: AnyNamedTuple] {
-  inline def apply[O <: AnyNamedTuple](o: Super[F] ?=> O): Override[F] = {
-    checkOverride[F, Names[O], DropNames[O]]
+  inline def apply[O <: AnyNamedTuple](o: Super[F] ?=> O)(using O SubsetOf F): Override[F] = {
     val names = constValueTuple[Names[O]].toList.asInstanceOf[List[String]]
-    new Override(Vector(Layer[F](names, s => o(using s).asInstanceOf[Tuple])))
+    new Override(Vector(Layer[F](names, s => Partial[F](o(using s)))))
   }
 
   // Stacked in order: each override's `upper` is the result of the ones before it.
@@ -130,11 +103,11 @@ object Overridable {
       case l =>
         layerCache.getOrElse(l, guarded(l, name) {
           val layer = layers(l - 1)
-          val tuple = layer.values(new Super[F] {
+          val partial = layer.values(new Super[F] {
             def self = views(top)
             def upper = views(l - 1)
           })
-          val values = layer.names.zip(tuple.productIterator).toMap
+          val values = base.names.zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
           layerCache(l) = values
           values
         })(name)
