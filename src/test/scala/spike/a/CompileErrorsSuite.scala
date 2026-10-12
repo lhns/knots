@@ -44,14 +44,16 @@ class CompileErrorsSuite extends munit.FunSuite {
     assertMentions(compileErrors("""Override[AppDeps]((db = new App().dbBase("u")))"""), "wrap it in module(...)")
   }
 
-  test("raw layer in a base") {
-    assertRejected(compileErrors(
-      """Overridable[AppDeps]((config = AppConfig("x", 1), db = new App().dbBase("u"), server = module(new App().serverBase(???, 1))))"""))
+  test("raw layer in a base is not a module") {
+    assertMentions(compileErrors(
+      """Overridable[AppDeps]((config = AppConfig("x", 1), db = new App().dbBase("u"), server = module(new App().serverBase(???, 1))))"""),
+      "Found:")
   }
 
-  test("override module in a base") {
-    assertRejected(compileErrors(
-      """Overridable[AppDeps]((config = AppConfig("x", 1), db = module(Override[DbDeps]((transactor = Transactor("t")))), server = module(new App().serverBase(???, 1))))"""))
+  test("module(override) in a base") {
+    assertMentions(compileErrors(
+      """Overridable[AppDeps]((config = AppConfig("x", 1), db = module(Override[DbDeps]((transactor = Transactor("t")))), server = module(new App().serverBase(???, 1))))"""),
+      "upper is only available in an Override")
   }
 
   test("module of the wrong set") {

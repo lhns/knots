@@ -38,3 +38,4 @@ One file per decision, reconstructed from the commits and the design discussion.
 - [0034. Spike C types module(...) as the member and rewrites it](0034-module-typed-as-member-in-spike-c.md)
 - [0035. Spike A uses a small macro for per-field overrides](0035-small-macro-for-per-field-overrides-in-a.md)
 - [0036. Spike A's base goes through the same macro (rejected)](0036-spike-a-base-through-the-macro.md)
+- [0037. Spike A's module markers are Views; large bases are joined from parts](0037-spike-a-markers-are-views-and-base-parts.md)

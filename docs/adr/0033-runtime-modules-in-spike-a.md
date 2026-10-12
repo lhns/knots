@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12, commit 4021ff7)
+Accepted (2026-10-12, commit 4021ff7); the match types are superseded by 0037
 
 ## Context
 

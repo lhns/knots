@@ -10,7 +10,10 @@ import scala.NamedTuple.AnyNamedTuple
 //
 // A BaseModule is complete (a base layer, which may replace a module in an override); a plain Module
 // wraps an Override and needs the layer below. A base accepts only BaseModule.
-class Module[S <: AnyNamedTuple] private[a] (val layer: Override[S]) {
+//
+// A marker is a View so that it fits a field of type View[S]; it is never read as one: tie replaces it.
+class Module[S <: AnyNamedTuple] private[a] (val layer: Override[S])
+    extends View[S](_ => throw IllegalStateException("a module(...) marker is not a view; it is tied when its field is computed")) {
   private[a] def tie(prefix: String, self: () => View[S], upper: () => View[S]): View[S] = layer match {
     case base: Overridable[S] => Overridable.tie(prefix, base.layers, Knot.Complete(base.fields, self))
     case _ => Overridable.tie(prefix, layer.layers, Knot.Passing(self, upper))
@@ -19,18 +22,8 @@ class Module[S <: AnyNamedTuple] private[a] (val layer: Override[S]) {
 
 final class BaseModule[S <: AnyNamedTuple](layer: Overridable[S]) extends Module[S](layer)
 
-// `using Self[?]` is only a scope guard: module(...) is usable inside a layer literal (Upper <: Self).
+// `using Self[?]` / `using Upper[?]` are scope guards: a complete module is usable in a base or an
+// override literal (Upper <: Self), an Override only where there is a layer below (an override literal).
 def module[S <: AnyNamedTuple](layer: Overridable[S])(using Self[?]): BaseModule[S] = new BaseModule(layer)
 
-def module[S <: AnyNamedTuple](layer: Override[S])(using Self[?]): Module[S] = new Module(layer)
-
-// The type a field of type X accepts in a base literal / in an override literal.
-type BaseField[X] = X match {
-  case View[s] => View[s] | BaseModule[s]
-  case _ => X
-}
-
-type OverrideField[X] = X match {
-  case View[s] => View[s] | Module[s]
-  case _ => X
-}
+def module[S <: AnyNamedTuple](layer: Override[S])(using Upper[?]): Module[S] = new Module(layer)

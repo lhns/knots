@@ -53,13 +53,16 @@ reserved field names (`selectDynamic`, `toTuple`, ...), while `Partial`/`SubsetO
 - Pros: no generated classes; the checks are ordinary type-level Scala; the only macro is a small one that
   splits an override literal into one deferred function per field (ADR 0035).
 - Cons:
-  - A base literal with more than 22 fields doesn't type, and a base field whose type is itself a named
-    tuple doesn't type (the match type allowing modules can't reduce there).
+  - A base literal over 22 fields doesn't get per-field types (a compiler limit), so a larger base is
+    written in parts of at most 22 fields: `((...): Part[Deps, P1]) ++ ((...): Part[Deps, P2])` with
+    `type Deps = NamedTuple.Concat[P1, P2]` (ADR 0037). Overrides of any size work as one literal.
   - An override given as a value (a variable, `++`) instead of a literal is evaluated as a whole.
   - `self.x` and the built object rely on IDE support for `Selectable`.
   - `Override[Deps]` always needs the type argument.
-- Modules: a field of type `View[DbDeps]` takes `module(DbModule.base(...))`. A has no macro, but
-  its runtime knows which field it is computing and ties the sub-knot focused through it (ADR 0033);
+- Modules: a field of type `View[DbDeps]` takes `module(DbModule.base(...))`; the marker is itself a
+  `View`, so no match type is needed (ADR 0037), and `module(override)` needs `upper`, so it doesn't
+  compile in a base. The runtime knows which field it is computing and ties the sub-knot focused
+  through it (ADR 0033);
   cycle messages show the module path (`db.userRepo (base)`). See `ModulesDemo`.
 
 ### B: generated delegate for traits (`b/`)
@@ -144,7 +147,7 @@ and `upper`, and each field computation gets its own copy. Object-literal member
 
 Each spike has an munit suite in `src/test/scala/spike/<x>/`: compile errors (`compileErrors`),
 laziness and compute-once, late binding and `upper`, `|+|` laws, cycles (also entered from several
-threads at once), and modules. Run all with `sbt test` on JDK 25+ (472 tests). Spike E's
+threads at once), and modules. Run all with `sbt test` on JDK 25+ (485 tests). Spike E's
 `LimitsSuite` pins its documented limits; the ones that would hang are ignored with the reason.
 
 ## What they have in common

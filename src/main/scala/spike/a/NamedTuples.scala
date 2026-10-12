@@ -26,10 +26,16 @@ inline def upper[F <: AnyNamedTuple](using s: Upper[F]): View[F] = s.upper
 
 // Every field of F, deferred until `self` exists.
 // A field that is a View of another named tuple is a module: it is supplied with module(...) (see Modules.scala).
-type Defs[F <: AnyNamedTuple] = NamedTuple.Map[F, [X] =>> Self[F] ?=> BaseField[X]]
+type Defs[F <: AnyNamedTuple] = Part[F, F]
+
+// The fields P of F, each deferred like a field of Defs[F]. A base literal over 22 fields doesn't get
+// per-field types, so ascribe parts and join them with `++` (fields stay lazy, self sees all of Deps):
+//   type Deps = NamedTuple.Concat[P1, P2]
+//   Overridable[Deps](((f1 = ..., ...): Part[Deps, P1]) ++ ((f13 = ..., ...): Part[Deps, P2]))
+type Part[F <: AnyNamedTuple, P <: AnyNamedTuple] = NamedTuple.Map[P, [X] =>> Self[F] ?=> X]
 
 // The fields of F, each computed on first access (`view.dep2`), also while the knot is being tied.
-final class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable {
+class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable {
   type Fields = F
 
   def selectDynamic(name: String): Any = resolve(name)
@@ -153,12 +159,19 @@ object Overridable {
       case v => v
     }
 
+    // Only a complete module can stand in a base; a Module (override) has no layer below to wrap.
+    def baseField(name: String, value: Any): Any = value match {
+      case m: Module[?] if !m.isInstanceOf[BaseModule[?]] =>
+        throw IllegalStateException(s"module($name) wraps an Override, which needs a layer below; a base takes a complete module")
+      case v => focus(v, name, noLayerBelow)
+    }
+
     lazy val baseCells = (knot match {
       case Knot.Root(base) => base
       case Knot.Complete(base, _) => base
       case Knot.Passing(_, _) => Map.empty[String, Self[F] => Any]
     }).map { (name, fn) =>
-      name -> Cell(s"$prefix$name (base)", () => focus(fn(new Self[F] { def self = finalView }), name, noLayerBelow))
+      name -> Cell(s"$prefix$name (base)", () => baseField(name, fn(new Self[F] { def self = finalView })))
     }
     // One upper per level, shared by the fields of its layer.
     lazy val uppers = Vector.tabulate(top + 1)(l => new Upper[F] {

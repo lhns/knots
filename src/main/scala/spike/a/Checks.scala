@@ -4,11 +4,9 @@ import scala.NamedTuple.{AnyNamedTuple, DropNames, Names}
 import scala.compiletime.{constValue, erasedValue, error}
 
 // Evidence that O is a valid override literal for F: F has no reserved field names, no field of O is a
-// raw layer (it needs module(...)), and O is a SubsetOf F's override field types (modules allowed).
+// raw layer (it needs module(...)), and O is a SubsetOf F (a module marker is a View).
 // The module rules are A's own; SubsetOf stays reusable without them (ADR 0029).
 infix sealed trait OverrideOf[O <: AnyNamedTuple, F <: AnyNamedTuple]
-
-type OverrideFields[F <: AnyNamedTuple] = NamedTuple.Map[F, [X] =>> OverrideField[X]]
 
 object OverrideOf {
   private object instance extends OverrideOf[AnyNamedTuple, AnyNamedTuple]
@@ -16,7 +14,7 @@ object OverrideOf {
   inline given derived[O <: AnyNamedTuple, F <: AnyNamedTuple]: OverrideOf[O, F] = {
     rejectReservedNames[F]
     rejectRawLayers[Names[O], DropNames[O]]
-    val _ = SubsetOf.derived[O, OverrideFields[F]]
+    val _ = SubsetOf.derived[O, F]
     instance.asInstanceOf[OverrideOf[O, F]]
   }
 

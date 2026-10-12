@@ -74,4 +74,15 @@ class OverridingSuite extends munit.FunSuite {
     Overridable.build(replaced, otherBase).toTuple
     assert(!computed)
   }
+
+  type Shape = (size: (w: Int, h: Int), label: String, tag: String => String)
+
+  test("a base field of named-tuple type, and an override setting it") {
+    val base = Overridable[Shape]((size = (w = 1, h = 2), label = "s" + self.size.w, tag = x => "#" + x))
+    val v = Overridable.build(base, Override[Shape]((size = (w = 5, h = 6))))
+    assertEquals(v.size, (w = 5, h = 6))
+    assertEquals(v.label, "s5")
+    assertEquals(v.tag("a"), "#a")
+    assertEquals(Overridable.build(base).size, (w = 1, h = 2))
+  }
 }
