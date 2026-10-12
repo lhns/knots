@@ -14,4 +14,4 @@ A layer accepts: a named-tuple literal `(dep2 = ...)` (each field its own lazy c
 
 ## Consequences
 
-One `apply` covers all common forms. Recognising the named-tuple literal depends on how the compiler desugars it, which needs care (fixes in progress).
+One `apply` covers all common forms. Recognising the named-tuple literal depends on how the compiler desugars it: the macro follows the literal's result, rejects statements in front of it, and handles more than 22 fields (d5d3150).
