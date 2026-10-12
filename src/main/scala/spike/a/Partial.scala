@@ -28,7 +28,9 @@ object SubsetOf {
       case _: ((n *: ns), (v *: vs)) =>
         inline if !constValue[Tuple.Contains[Names[F], n]] then
           error("unknown field: " + constValue[n])
-        else inline if !conforms[v, FieldType[F, n]] then
+        else inline if conforms[v, Override[?]] || conforms[v, Overridable[?]] then
+          error("field " + constValue[n] + " is a module: wrap the layer in module(...)")
+        else inline if !conforms[v, OverrideField[FieldType[F, n]]] then
           error("wrong type for field " + constValue[n])
         else check[F, ns, vs]
     }

@@ -1,0 +1,34 @@
+package spike.a
+
+import scala.NamedTuple.AnyNamedTuple
+
+// A module is a field whose type is a View of another named tuple, supplied with that tuple's layer
+// marked by module(...): `db = module(DbModule.base(self.config.dbUrl))`. When the field is computed,
+// Overridable.tie builds the layer focused through the field: its `self` is the root's final `db`,
+// its `upper` the layer below's `db`, so late binding works through the whole tree and a deep
+// override is a nested Override. The field's value is the module's lazy View.
+//
+// A BaseModule is complete (a base layer, which may replace a module in an override); a plain Module
+// is an Override and needs the layer below. A base accepts only BaseModule.
+class Module[S <: AnyNamedTuple] private[a] (val base: Overridable[S] | Null, val overrides: Override[S]) {
+  private[a] def tie(prefix: String, self: () => Any, upper: (() => Any) | Null): View[S] =
+    Overridable.tie[S](prefix, if base == null then null else base.base, overrides.layers, self, upper)
+}
+
+final class BaseModule[S <: AnyNamedTuple](layer: Overridable[S]) extends Module[S](layer, layer.overrides)
+
+// `using Self[?]` is only a scope guard: module(...) is usable inside a layer literal (Upper <: Self).
+def module[S <: AnyNamedTuple](layer: Overridable[S])(using Self[?]): BaseModule[S] = new BaseModule(layer)
+
+def module[S <: AnyNamedTuple](layer: Override[S])(using Self[?]): Module[S] = new Module(null, layer)
+
+// The type a field of type X accepts in a base literal / in an override literal.
+type BaseField[X] = X match {
+  case View[s] => View[s] | BaseModule[s]
+  case _ => X
+}
+
+type OverrideField[X] = X match {
+  case View[s] => View[s] | Module[s]
+  case _ => X
+}
