@@ -29,7 +29,7 @@ opaque type Override[A] = Upper[A] => A
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
-  // `o` defines every member of A (`new { lazy val dep1 = ... }`, `(dep1 = ..., ...)`, see Macros).
+  // `o` defines every member of A (`(dep1 = ..., ...)`, `new { def dep1 = ... }`, see Macros).
   inline def apply[A](inline o: Self[A] ?=> Any): Overridable[A] =
     s => Macros.derive[A, Self[A]](o, s, isBase = true)
 
@@ -79,16 +79,18 @@ private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
 // is in the middle of computing, passed explicitly (see Tagged): asking for a cell already on it is
 // a cycle and fails with the path, where a lazy val would wait on itself forever. Other callers
 // wait for the value.
-final class Cell[T](val name: String) {
+final class Cell(val name: String) {
   private enum State {
     case Empty
     case Pending(done: CountDownLatch)
-    case Done(value: T)
+    case Done(value: Any)
   }
   private val state = new AtomicReference[State](State.Empty)
 
-  def get(path: List[Cell[?]])(compute: List[Cell[?]] => T): T = state.get match {
-    // Checked before the path: a path kept from a finished computation is no cycle.
+  // Done is checked before the path, so a `self` kept from a finished computation is no cycle. One
+  // rare false positive remains: such a kept `self` used while the member is being recomputed after
+  // a failure.
+  def get(path: List[Cell])(compute: List[Cell] => Any): Any = state.get match {
     case State.Done(value) => value
     case _ if path.contains(this) => throw new CycleException(path.dropWhile(_ ne this).map(_.name) :+ name)
     case State.Pending(done) =>
@@ -116,28 +118,28 @@ final class CycleException(path: List[String]) extends IllegalStateException(s"c
 // used from, sharing the cells. User code computing a member gets `self`/`upper` tagged that way, so
 // the path travels along every `self.x` / `upper.x` without any thread- or scope-bound state.
 trait Tagged[A] {
-  def at(path: List[Cell[?]]): A
+  def at(path: List[Cell]): A
 }
 
 object Tag {
   // The state of one generated instance, set right after creation. Kept here: the compiler can't
   // generate setters for vars declared by a macro.
   final class Slot {
-    var path: List[Cell[?]] = Nil
-    var cells: Array[Cell[Any]] = null
+    var path: List[Cell] = Nil
+    var cells: Array[Cell] = null
   }
 
-  def apply[A](a: A, path: List[Cell[?]]): A = a match {
+  def apply[A](a: A, path: List[Cell]): A = a match {
     case t: Tagged[?] => t.at(path).asInstanceOf[A]
     case a => a // a complete instance passed in as is
   }
 
   // The context user code computing a member on behalf of `path` sees.
-  def self[A](s: Self[A], path: List[Cell[?]]): Self[A] = new Self[A] {
+  def self[A](s: Self[A], path: List[Cell]): Self[A] = new Self[A] {
     def self: A = Tag(s.self, path)
   }
 
-  def upper[A](s: Upper[A], path: List[Cell[?]]): Upper[A] = new Upper[A] {
+  def upper[A](s: Upper[A], path: List[Cell]): Upper[A] = new Upper[A] {
     def self: A = Tag(s.self, path)
     def upper: A = Tag(s.upper, path)
   }
