@@ -164,8 +164,15 @@ object Macros {
           if modules(name) then
             Option.when(isBase && !(actual <:< layerOf(TypeRepr.of[Overridable], required)))(
               (s"$name: a base needs an Overridable[${required.show}], there is no layer below to override", pos))
-          else Option.when(!(actual <:< required))(
-            (s"$name has type ${actual.show}, expected ${required.show} (or an Overridable/Override of it)", pos))
+          else Option.when(!(actual <:< required)) {
+            // A layer of the wrong trait gets a hint that layers are accepted here.
+            val isLayer = actual.widen match {
+              case AppliedType(tc, _) => Set(TypeRepr.of[Override], TypeRepr.of[Overridable]).exists(_.typeSymbol == tc.typeSymbol)
+              case _ => false
+            }
+            val hint = if isLayer then " or a layer of it" else ""
+            (s"$name has type ${actual.show}, expected ${required.show}$hint", pos)
+          }
       }
     }
     val missing = fields.filter(f => isBase && f.requiredInBase && !supplied.contains(f.name)).map(_.name)

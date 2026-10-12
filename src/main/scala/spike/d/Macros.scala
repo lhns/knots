@@ -139,12 +139,30 @@ object Macros {
     // --- Checks: report every problem, but don't generate code from a mismatching argument. ---
 
     val byName = fields.map(f => f.name -> f).toMap
+    // A field can also be supplied with a layer of its own type: a module (see Overridable.focus). A
+    // base has no layer below, so it needs a complete Overridable there.
+    def layerOf(layer: TypeRepr, t: TypeRepr) = layer.appliedTo(t)
+    val modules = supplied.collect {
+      case (name, (actual, _, _)) if byName.get(name).exists(f => !(actual <:< resultType(f.memberType)) &&
+        actual <:< layerOf(TypeRepr.of[Override], resultType(f.memberType))) => name
+    }.toSet
     val typeProblems = supplied.toList.flatMap { case (name, (actual, pos, _)) =>
       byName.get(name) match {
         case None => Some((s"$name is not a member of ${target.show}", pos))
         case Some(f) =>
           val required = resultType(f.memberType)
-          Option.when(!(actual <:< required))((s"$name has type ${actual.show}, expected ${required.show}", pos))
+          if modules(name) then
+            Option.when(isBase && !(actual <:< layerOf(TypeRepr.of[Overridable], required)))(
+              (s"$name: a base needs an Overridable[${required.show}], there is no layer below to override", pos))
+          else Option.when(!(actual <:< required)) {
+            // A layer of the wrong trait gets a hint that layers are accepted here.
+            val isLayer = actual.widen match {
+              case AppliedType(tc, _) => Set(TypeRepr.of[Override], TypeRepr.of[Overridable]).exists(_.typeSymbol == tc.typeSymbol)
+              case _ => false
+            }
+            val hint = if isLayer then " or a layer of it" else ""
+            (s"$name has type ${actual.show}, expected ${required.show}$hint", pos)
+          }
       }
     }
     val missing = fields.filter(f => isBase && f.requiredInBase && !supplied.contains(f.name)).map(_.name)
@@ -174,8 +192,17 @@ object Macros {
       selfType = None)
 
     def compute(f: Field, argss: List[List[Tree]]): Term = supplied.get(f.name) match {
+      case Some((_, _, term)) if modules(f.name) => module(f, term)
       case Some((_, _, term)) => applyArgs(term, argss)
       case None => f.fromUpper(upper.get, argss)
+    }
+    // A module's layer run focused through its field (see Overridable.focus).
+    def module(f: Field, layer: Term): Term = resultType(f.memberType).asType match {
+      case '[t] =>
+        val get = Lambda(owner, MethodType(List("root"))(_ => List(target), _ => TypeRepr.of[t]),
+          (meth, params) => f.fromUpper(params.head.asInstanceOf[Term], Nil).changeOwner(meth)).asExprOf[A => t]
+        if isBase then '{ Overridable.focus[A, t](${ s.asExprOf[Self[A]] }, $get, ${ layer.asExprOf[Overridable[t]] }) }.asTerm
+        else '{ Override.focus[A, t](${ s.asExprOf[Upper[A]] }, $get, ${ layer.asExprOf[Override[t]] }) }.asTerm
     }
     val fieldDefs = generated.flatMap { f =>
       val get = cls.declaredMethod(f.name).head
