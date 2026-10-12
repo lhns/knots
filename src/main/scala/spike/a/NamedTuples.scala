@@ -36,7 +36,7 @@ object Override {
   // `Override[F]` fixes F; the builder's `apply` then infers the literal's type O.
   def apply[F <: AnyNamedTuple]: OverrideBuilder[F] = OverrideBuilder()
 
-  // `x |+| y` layers y below x: y overrides x, so y's `upper` is x's result.
+  // `x |+| y` is y extending x: y's `upper` (its super) is x's result.
   given [F <: AnyNamedTuple]: Monoid[Override[F]] with {
     def empty: Override[F] = new Override(Vector.empty)
     def combine(x: Override[F], y: Override[F]): Override[F] = new Override(x.layers ++ y.layers)

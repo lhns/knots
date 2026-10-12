@@ -19,7 +19,7 @@ inline def upper[A](using s: Super[A]): A = s.upper
 opaque type Override[A] = Super[A] => A
 
 // A base is an override that doesn't need `upper`, so it can stand wherever an Override can,
-// e.g. below another base to replace it completely.
+// e.g. as a child of another base, replacing it completely.
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
@@ -49,7 +49,7 @@ object Override {
   inline def apply[A](inline o: Super[A] ?=> Any): Override[A] =
     s => Derive.derive[A, Super[A]](o, s, isBase = false)
 
-  // `x |+| y` layers y below x: y overrides x, so y's `upper` is x's result. `empty` passes `upper` through.
+  // `x |+| y` is y extending x: y's `upper` (its super) is x's result. `empty` passes `upper` through.
   // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit
   // search would find cats' instance for plain functions instead.
   given monoid[A]: Monoid[Override[A]] with {
@@ -59,12 +59,12 @@ object Override {
   }
 }
 
-// Layers `lowerLayer` below `upperLayer`: lowerLayer overrides upperLayer, so its `upper` is
-// upperLayer's result. Both get the same `s`: the final `self` (late binding) and, if this pair is
-// itself an override inside a bigger stack, the `upper` from outside. `upperLayer` is a base
+// Like `class Child extends Parent`: `upper` is `super`, `self` is the final `this`. The child's
+// `upper` is the parent's result; both see the same `s`, i.e. the same final `self` and, if this
+// pair is itself an override in a bigger chain, the same outer `upper`. The parent is a base
 // (S = Self) or another override (S = Super).
-private def layer[A, S <: Self[A]](upperLayer: S => A, lowerLayer: Override[A]): S => A =
-  s => lowerLayer(new Super[A] {
-    lazy val upper: A = upperLayer(s)
+private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
+  s => child(new Super[A] {
+    lazy val upper: A = parent(s)
     def self: A = s.self
   })
