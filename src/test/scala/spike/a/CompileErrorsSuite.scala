@@ -85,4 +85,10 @@ class CompileErrorsSuite extends munit.FunSuite {
   test("ordinary names are accepted") {
     assertEquals(compileErrors("""Overridable[(name: String, value: Int)]((name = "n", value = 1))"""), "")
   }
+
+  test("statements before the override literal are rejected") {
+    assertMentions(
+      compileErrors("""Override[Deps]({ println("hi"); (dep2 = Dep("x")) })"""),
+      "statements before the named tuple are not supported")
+  }
 }

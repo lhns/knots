@@ -25,7 +25,7 @@ private def current: List[Cell] = if computing.isBound then computing.get else N
 // (`executor.submit(..).get()`, `IO(..).unsafeRunSync()`) while the other side needs the computing
 // cell can still deadlock, like a lazy val. StructuredTaskScope forks inherit the ScopedValue, so
 // their waits are part of the chain and are detected.
-final class Cell(val name: String, compute: () => Any, hint: String = "") {
+final class Cell(val name: String, compute: () => Any) {
   @volatile private var value: Any = Cell.Unset
   // The running computation, if any; guarded by Cell.lock.
   private var running: Cell.Attempt | Null = null
@@ -37,7 +37,7 @@ final class Cell(val name: String, compute: () => Any, hint: String = "") {
       val path = current
       if path.contains(this) then {
         val cycle = path.dropWhile(_ ne this)
-        throw new CycleException(cycle.map(_.name) :+ name, if cycle.length == 1 then hint else "")
+        throw new CycleException(cycle.map(_.name) :+ name)
       }
       val mine = claim(path)
       if mine == null then value
@@ -65,7 +65,7 @@ final class Cell(val name: String, compute: () => Any, hint: String = "") {
       else {
         Cell.await(path, this)
         other.failure match {
-          case c: CycleException => throw new CycleException(c.path, c.hint)
+          case c: CycleException => throw new CycleException(c.path)
           case _ =>
         }
       }
@@ -119,6 +119,5 @@ private object Cell {
   }
 }
 
-// `hint` explains a cycle that is a single cell asking for itself.
-final class CycleException(val path: List[String], val hint: String = "")
-    extends IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}$hint")
+final class CycleException(val path: List[String])
+    extends IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")

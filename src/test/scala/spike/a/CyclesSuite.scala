@@ -17,13 +17,17 @@ class CyclesSuite extends munit.FunSuite {
     assertEquals(e.getMessage, "cyclic dependency: a (base) -> b (base) -> a (base)")
   }
 
-  test("a field of a layer that needs another field of it gets the layer-unit hint") {
+  test("a cycle between fields of one override names the fields") {
     val v = Overridable.build(
       deps,
-      Override[Deps]((dep1 = Dep("x"), dep2 = Dep(self.dep1.name))))
-    val e = intercept[CycleException](v.dep2)
-    assert(e.getMessage.contains("dep1, dep2 (layer 1) -> dep1, dep2 (layer 1)"), clue(e.getMessage))
-    assert(e.getMessage.contains("evaluated as a unit"), clue(e.getMessage))
+      Override[Deps]((dep1 = Dep(self.dep2.name), dep2 = Dep(self.dep1.name))))
+    val e = intercept[CycleException](v.dep1)
+    assertEquals(e.getMessage, "cyclic dependency: dep1 (layer 1) -> dep2 (layer 1) -> dep1 (layer 1)")
+  }
+
+  test("a field of an override asking for itself names it") {
+    val v = Overridable.build(deps, Override[Deps]((dep2 = Dep(self.dep2.name))))
+    assertEquals(intercept[CycleException](v.dep2).getMessage, "cyclic dependency: dep2 (layer 1) -> dep2 (layer 1)")
   }
 
   test("a cycle across layers shows the layer labels") {

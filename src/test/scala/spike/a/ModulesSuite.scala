@@ -120,4 +120,26 @@ class ModulesSuite extends munit.FunSuite {
       assertEquals(reads.map(_.get(5, TimeUnit.SECONDS)).toList, List.fill(4)("cycle"))
     } finally executor.shutdownNow()
   }
+
+  test("a module next to other fields in one override: each field on its own") {
+    val app = App()
+    val v = Overridable.build(app.base, Override[AppDeps]((
+      config = AppConfig("jdbc:multi", 1),
+      db = module(Override[DbDeps]((transactor = Transactor("w(" + upper.transactor.url + ")")))),
+      server = module(Override[ServerDeps]((port = upper.port + 1))))))
+    assertEquals(v.db.transactor.url, "w(jdbc:multi)")
+    assertEquals(v.server.port, 2)
+    assertEquals(v.config, AppConfig("jdbc:multi", 1))
+  }
+
+  test("a module field of a multi-field override is not computed when only another field is read") {
+    val app = App()
+    val v = Overridable.build(app.base, Override[AppDeps]((
+      config = AppConfig("jdbc:multi", 1),
+      db = module(app.dbBase("jdbc:other")))))
+    assertEquals(v.config.port, 1)
+    assertEquals(app.transactors.get, 0)
+    assertEquals(v.db.transactor.url, "jdbc:other")
+    assertEquals(app.transactors.get, 1)
+  }
 }

@@ -7,8 +7,8 @@ import scala.annotation.implicitNotFound
 
 // Type safety lives at the literal boundary: `Defs` types a base literal, `SubsetOf` (via `OverrideOf`)
 // checks an override literal. Past that, everything is string-keyed (field names, `Map[String, Any]`,
-// `View.selectDynamic`) and cast back to what the literals already guaranteed, by design: it keeps the
-// runtime free of macros and generated code.
+// `View.selectDynamic`) and cast back to what the literals already guaranteed, by design. The only macro
+// splits an override literal into per-field closures (Macros.scala); there is no generated code.
 
 @implicitNotFound("self is only available inside an Overridable[...](...) or Override[...](...) literal")
 trait Self[F <: AnyNamedTuple] {
@@ -40,9 +40,25 @@ extension [F <: AnyNamedTuple](view: View[F])
   inline def toTuple: F =
     Tuple.fromArray(fieldNames[F].map(view.selectDynamic).toArray[Any]).asInstanceOf[F]
 
-// A layer is evaluated as a unit: its fields can't reference each other via `self`.
-// `values` has the overridden fields only, by name.
-final case class Layer[F <: AnyNamedTuple](names: List[String], values: Upper[F] => Map[String, Any])
+// The overridden fields of one override, by name. `thunks(upper)` has one computation per name, in
+// order; the knot caches each in its own Cell, so a field is computed on its own and may use the
+// others via `self`.
+final case class Layer[F <: AnyNamedTuple](names: List[String], thunks: Upper[F] => List[() => Any])
+
+object Layer {
+  // A literal split by the macro (Macros.scala): one closure per field.
+  def perField[F <: AnyNamedTuple](names: List[String], fns: List[Upper[F] => Any]): Layer[F] =
+    Layer(names, u => fns.map(f => () => f(u)))
+
+  // Fallback for an override that isn't a literal (a named-tuple value, `++`, a variable): its value
+  // is computed as a whole, once per knot, and each field reads its element. So the fields of such an
+  // override can't use each other via `self` (the cycle error names the whole).
+  def whole[F <: AnyNamedTuple](names: List[String], value: Upper[F] => Product): Layer[F] =
+    Layer(names, u => {
+      val all = Cell(s"${names.mkString(", ")} (layer, evaluated as a whole)", () => value(u))
+      names.indices.toList.map(i => () => all.get.asInstanceOf[Product].productElement(i))
+    })
+}
 
 // Layers on top of whatever is below. An Overridable (a base, ADR 0008) is an Override that brings
 // its own fields, so it stands wherever an override can: layered on something, it replaces everything below.
@@ -64,10 +80,9 @@ object Override {
 }
 
 final class OverrideBuilder[F <: AnyNamedTuple] {
-  inline def apply[O <: AnyNamedTuple](o: Upper[F] ?=> O)(using OverrideOf[O, F]): Override[F] = {
-    val names = fieldNames[O]
-    new Override(Vector(Layer[F](names, s => names.zip(o(using s).asInstanceOf[Product].productIterator).toMap)))
-  }
+  // The macro splits a literal `(dep2 = ..., dep3 = ...)` into one closure per field.
+  inline def apply[O <: AnyNamedTuple](inline o: Upper[F] ?=> O)(using OverrideOf[O, F]): Override[F] =
+    new Override(Vector(Macros.layer[F, O](o)))
 }
 
 final class Overridable[F <: AnyNamedTuple](
@@ -106,8 +121,7 @@ object Overridable {
   private val noLayerBelow: () => Nothing = () => throw new IllegalStateException("there is no layer below the base")
 
   // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1. Nothing is
-  // computed here: each base field and each layer is a Cell, computed on first access. A layer is
-  // computed as a whole, so its fields can't use each other via `self`.
+  // computed here: each base field and each field of each layer is a Cell, computed on first access.
   //
   // A module (Modules.scala) is tied by the same code, focused through its field of the parent (see
   // Knot). Module values found in a base field or a layer are tied this way when the field is computed.
@@ -128,7 +142,7 @@ object Overridable {
         case Knot.Passing(_, upper) => upper().selectDynamic(name)
         case _ => baseCells(name).get
       }
-      case l => layerCells(l - 1).get.asInstanceOf[Map[String, Any]](name)
+      case l => layerCells(l - 1)(name).get
     }
 
     // A module's sub-knot sees the final view of its field as `self` and the layer below's as `upper`.
@@ -146,14 +160,16 @@ object Overridable {
     }).map { (name, fn) =>
       name -> Cell(s"$prefix$name (base)", () => focus(fn(new Self[F] { def self = finalView }), name, noLayerBelow))
     }
-    lazy val layerCells = layers.zipWithIndex.map { (layer, i) =>
+    // One upper per level, shared by the fields of its layer.
+    lazy val uppers = Vector.tabulate(top + 1)(l => new Upper[F] {
+      def self = finalView
+      def upper = views(l - 1)
+    })
+    lazy val layerCells: Vector[Map[String, Cell]] = layers.zipWithIndex.map { (layer, i) =>
       val l = i + 1
-      Cell(s"$prefix${layer.names.mkString(", ")} (layer $l)", () => {
-        layer.values(new Upper[F] {
-          def self = finalView
-          def upper = views(l - 1)
-        }).map { (n, v) => n -> focus(v, n, () => views(l - 1)) }
-      }, " (a layer is evaluated as a unit; its fields can't use each other via self)")
+      layer.names.zip(layer.thunks(uppers(l))).map { (n, thunk) =>
+        n -> Cell(s"$prefix$n (layer $l)", () => focus(thunk(), n, () => views(l - 1)))
+      }.toMap
     }
 
     views(top)
