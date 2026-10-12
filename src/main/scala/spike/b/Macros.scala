@@ -8,7 +8,7 @@ import scala.quoted.*
 //   or an instance of some class. A generated subclass of A forwards those to it and the rest to
 //   `upper`; a base (`isBase`) has no upper and must define every abstract member of A.
 // The supplied members are checked against A at compile time.
-object Derive {
+object Macros {
   inline def derive[A, S <: Self[A]](inline o: S ?=> Any, s: S, inline isBase: Boolean): A =
     ${ deriveImpl[A, S]('o, 's, 'isBase) }
 

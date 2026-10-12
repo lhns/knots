@@ -23,9 +23,9 @@ opaque type Override[A] = Upper[A] => A
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
-  // `o` defines every abstract member of A: `new { lazy val dep1 = ... }`, see Derive.
+  // `o` defines every abstract member of A: `new { lazy val dep1 = ... }`, see Macros.
   inline def apply[A](inline o: Self[A] ?=> Any): Overridable[A] =
-    s => Derive.derive[A, Self[A]](o, s, isBase = true)
+    s => Macros.derive[A, Self[A]](o, s, isBase = true)
 
   // Layering on a base keeps it a base (it still needs no upper); Override's monoid alone
   // would widen the result to Override.
@@ -45,9 +45,9 @@ object Overridable {
 }
 
 object Override {
-  // `o` defines only the overridden members; the rest come from `upper`, see Derive.
+  // `o` defines only the overridden members; the rest come from `upper`, see Macros.
   inline def apply[A](inline o: Upper[A] ?=> Any): Override[A] =
-    s => Derive.derive[A, Upper[A]](o, s, isBase = false)
+    s => Macros.derive[A, Upper[A]](o, s, isBase = false)
 
   // `x |+| y` is y extending x: y's `upper` (its super) is x's result. `empty` passes `upper` through.
   // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit
