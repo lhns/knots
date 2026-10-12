@@ -26,11 +26,16 @@ object Derive {
           case _ => foldOverTree(None, tree)(owner)
         })
     }
-    val anon = firstClass.foldTree(None, o.asTerm)(Symbol.spliceOwner)
-      .getOrElse(report.errorAndAbort("expected an object literal: new { ... }", o))
+    def lambdaBody(t: Term): Option[Term] = t match {
+      case Inlined(_, _, e) => lambdaBody(e)
+      case Block(List(d: DefDef), _: Closure) => d.rhs
+      case _ => None
+    }
+    // Any value that already is an A (a variable, a `new A { ... }`) is used as is.
+    if lambdaBody(o.asTerm).exists(_.tpe.widen <:< target) then return '{ () }
 
-    // A literal that extends A is already checked by the compiler.
-    if anon.typeRef <:< target then return '{ () }
+    val anon = firstClass.foldTree(None, o.asTerm)(Symbol.spliceOwner)
+      .getOrElse(report.errorAndAbort(s"expected an object literal new { ... } or a ${target.show}", o))
 
     def resultType(t: TypeRepr): TypeRepr = t match {
       case ByNameType(r) => r
