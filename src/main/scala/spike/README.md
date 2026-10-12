@@ -36,7 +36,7 @@ that uses `self.dep2` must see the overridden `dep2`.
 | Laziness | per field (`Cell`) | per field (`Cell`) | per overridden member (`Cell`) | per field (`Cell`) | per field (`Cell`) |
 | Cycle detection | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | explicit path + wait-for graph, with gaps |
 | Modules (nested sets) | yes, focused at runtime | yes | yes, `module(...)` rewritten by the macro | yes | yes |
-| Macros | one small macro (splits override literals), otherwise type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
+| Macros | one small macro (splits base and override literals), otherwise type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
 | JDK | 25+ | 25+ | 25+ | 25+ | 21+ |
 
 ### A: named tuples, almost no macros (`a/`)
@@ -51,11 +51,12 @@ everything below it); the override check (`Checks.scala`) rejects raw layers for
 reserved field names (`selectDynamic`, `toTuple`, ...), while `Partial`/`SubsetOf` stay reusable on their own.
 
 - Pros: no generated classes; the checks are ordinary type-level Scala; the only macro is a small one that
-  splits an override literal into one deferred function per field (ADR 0035).
+  splits a base or override literal into one deferred function per field (ADRs 0035, 0036), so any
+  number of fields works.
 - Cons:
-  - A base literal with more than 22 fields doesn't type, and a base field whose type is itself a named
-    tuple doesn't type (the match type allowing modules can't reduce there).
-  - An override given as a value (a variable, `++`) instead of a literal is evaluated as a whole.
+  - A base or override given as a value (a variable, `++`) instead of a literal is evaluated as a whole.
+  - Base fields are typed without the field's expected type, so a lambda field whose parameter types
+    come only from the field type needs them written out.
   - `self.x` and the built object rely on IDE support for `Selectable`.
   - `Override[Deps]` always needs the type argument.
 - Modules: a field of type `View[DbDeps]` takes `module(DbModule.base(...))`. A has no macro, but
@@ -144,7 +145,7 @@ and `upper`, and each field computation gets its own copy. Object-literal member
 
 Each spike has an munit suite in `src/test/scala/spike/<x>/`: compile errors (`compileErrors`),
 laziness and compute-once, late binding and `upper`, `|+|` laws, cycles (also entered from several
-threads at once), and modules. Run all with `sbt test` on JDK 25+ (472 tests). Spike E's
+threads at once), and modules. Run all with `sbt test` on JDK 25+ (488 tests). Spike E's
 `LimitsSuite` pins its documented limits; the ones that would hang are ignored with the reason.
 
 ## What they have in common

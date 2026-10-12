@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-13); supersedes the "macro-free" description of spike A in 0028 and the whole-layer evaluation noted in 0032
+Accepted (2026-10-13); the macro-free base is superseded by 0036; supersedes the "macro-free" description of spike A in 0028 and the whole-layer evaluation noted in 0032
 
 ## Context
 

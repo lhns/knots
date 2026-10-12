@@ -37,3 +37,4 @@ One file per decision, reconstructed from the commits and the design discussion.
 - [0033. Spike A focuses modules at runtime](0033-runtime-modules-in-spike-a.md)
 - [0034. Spike C types module(...) as the member and rewrites it](0034-module-typed-as-member-in-spike-c.md)
 - [0035. Spike A uses a small macro for per-field overrides](0035-small-macro-for-per-field-overrides-in-a.md)
+- [0036. Spike A's base goes through the same macro](0036-spike-a-base-through-the-macro.md)
