@@ -1,6 +1,6 @@
 # Architecture decision records
 
-One file per decision, reconstructed from the commits and the design discussion. Numbered roughly in the order they were made (0028 and 0029 date from early in the redesign). "In progress" means the decision is made and its implementation is being worked on.
+One file per decision, reconstructed from the commits and the design discussion. Numbered roughly in the order they were made (0028 and 0029 date from early in the redesign).
 
 - [0001. Tie the knot for overridable dependency sets](0001-tie-the-knot-for-overridable-dependencies.md)
 - [0002. Pass self and upper as context parameters](0002-self-and-upper-as-context-parameters.md)

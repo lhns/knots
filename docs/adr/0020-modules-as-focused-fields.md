@@ -10,7 +10,7 @@ Larger applications consist of modules (database, server, ...) that are defined 
 
 ## Decision
 
-A field whose type is a dependency trait (`db: DbDeps`) can be given that trait's layer; it runs focused through the field: its `self` is the root's final `db`, its `upper` the layer below's `db`. Modules take what they need from outside as (by-name) parameters, not as abstract members, so a module's base stays complete.
+A field whose type is a dependency trait (`db: DbDeps`) can be given that trait's layer (wrapped in `module(...)`, see 0021); it runs focused through the field: its `self` is the root's final `db`, its `upper` the layer below's `db`. Modules take what they need from outside as (by-name) parameters, not as abstract members, so a module's base stays complete.
 
 ## Consequences
 

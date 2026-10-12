@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12; implementation in progress)
+Accepted (2026-10-12, commits d5d3150, spike D; and spike E)
 
 ## Context
 
@@ -14,4 +14,4 @@ Before a computation waits on a cell that is being computed, it records "my chai
 
 ## Consequences
 
-Concurrent cycles fail instead of deadlocking. Not detectable: a computation blocking on something that isn't a cell (`executor.submit(..).get()`, `IO(..).unsafeRunSync()`) while the other side needs the computing cell; this deadlocks the same way with a plain lazy val and is documented.
+Concurrent cycles fail instead of deadlocking: each thread involved gets a `CycleException` (a waiter whose cell failed with one rethrows it instead of recomputing, because a retry would only run into the cycle again, after repeating its side effects). Not detectable: a computation blocking on something that isn't a cell (`executor.submit(..).get()`, `IO(..).unsafeRunSync()`) while the other side needs the computing cell; this deadlocks the same way with a plain lazy val and is documented.

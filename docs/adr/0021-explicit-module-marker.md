@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12; implementation in progress)
+Accepted (2026-10-12, commit d5d3150, spikes D and E)
 
 ## Context
 

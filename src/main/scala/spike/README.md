@@ -34,12 +34,10 @@ that uses `self.dep2` must see the overridden `dep2`.
 | Override input | partial named-tuple literal | object literal, class instance, complete instance | `new T { override ... }` | named-tuple literal, object literal, class instance, named-tuple value, complete instance | same as D |
 | Who implements unsupplied members | runtime lookup by field name | macro-generated delegate class | trait defaults (`= inherited`) | macro-generated delegate class | macro-generated delegate class |
 | Laziness | each override layer as a whole | per field (`Cell`) | your own `lazy val`s | per field (`Cell`) | per field (`Cell`) |
-| Cycle detection | yes, single thread | yes (`ScopedValue`) | no, a cycle hangs | yes (`ScopedValue` + wait-for graph*) | yes (explicit path + wait-for graph*), with gaps |
+| Cycle detection | yes, single thread | yes (`ScopedValue`), single thread | no, a cycle hangs | yes (`ScopedValue` + wait-for graph) | yes (explicit path + wait-for graph), with gaps |
 | Modules (nested sets) | no | no | no | yes | yes |
 | Macros | none, only type-level code | generates a class | checks only | generates a class | generates a class |
 | JDK | 21+ | 25+ | 21+ | 25+ | 21+ |
-
-\* in progress, see "Current state" below.
 
 ### A: named tuples, no macros (`a/`)
 
@@ -140,12 +138,16 @@ and `upper`, and each field computation gets its own copy. Object-literal member
 
 ## Current state
 
-- Being applied to D and E after adversarial testing:
+- Applied to D and E after adversarial testing:
   - the required `module(...)` marker (ADR 0021);
   - rejecting concrete members of target traits (ADR 0022);
-  - the wait-for graph against cross-thread cycle deadlocks (ADR 0019);
-  - more robust recognition of named-tuple literals;
-  - clearer errors and guards for unusual traits.
-- B and C don't get these yet.
+  - the wait-for graph, so a cycle entered by several threads throws in each of them (ADR 0019);
+  - robust recognition of named-tuple literals (statements before it are an error, more than 22
+    fields stay lazy, `++` works);
+  - one clear error for wrong inputs, and guards for unusual traits.
+- B and C don't have these.
+- Remaining gaps in D: a cycle through work handed to another thread inside a computation
+  (`executor.submit(...).get()`), complete instances (not cached, no cycle detection), a named
+  class reading `self` in its constructor, very deep `upper` chains.
 - The open question for the final choice is how IntelliJ handles `self.x` on a `View`. For trait
   targets in D the IDE question doesn't arise.
