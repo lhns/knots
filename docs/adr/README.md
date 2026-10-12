@@ -34,3 +34,5 @@ One file per decision, reconstructed from the commits and the design discussion.
 - [0030. Give spike C cycle detection through a generated wrapper](0030-cells-for-spike-c.md)
 - [0031. Compile with -Yretain-trees](0031-retain-trees.md)
 - [0032. Spike A's build returns a lazy View](0032-lazy-view-result-in-spike-a.md)
+- [0033. Spike A focuses modules at runtime](0033-runtime-modules-in-spike-a.md)
+- [0034. Spike C types module(...) as the member and rewrites it](0034-module-typed-as-member-in-spike-c.md)

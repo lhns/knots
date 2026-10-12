@@ -14,4 +14,4 @@ A field whose type is a dependency trait (`db: DbDeps`) can be given that trait'
 
 ## Consequences
 
-Late binding works across the whole tree, deep overrides are nested overrides, and two apps built from one module share nothing. Building a module separately (`Overridable.build`) inside a field is allowed but closes that knot.
+Implemented in all spikes (B to E with the generated classes, A at runtime per 0033, C per 0034). Late binding works across the whole tree, deep overrides are nested overrides, and two apps built from one module share nothing. Building a module separately (`Overridable.build`) inside a field is allowed but closes that knot.

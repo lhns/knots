@@ -35,7 +35,7 @@ that uses `self.dep2` must see the overridden `dep2`.
 | Who implements unsupplied members | runtime lookup by field name | macro-generated delegate class | trait defaults (`= inherited`) | macro-generated delegate class | macro-generated delegate class |
 | Laziness | per base field, each override layer as a whole (`Cell`) | per field (`Cell`) | per overridden member (`Cell`) | per field (`Cell`) | per field (`Cell`) |
 | Cycle detection | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | explicit path + wait-for graph, with gaps |
-| Modules (nested sets) | no (possible at runtime) | yes | no (possible) | yes | yes |
+| Modules (nested sets) | yes, focused at runtime | yes | yes, `module(...)` rewritten by the macro | yes | yes |
 | Macros | none, only type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
 | JDK | 25+ | 25+ | 25+ | 25+ | 21+ |
 
@@ -54,7 +54,9 @@ D's `Cell` (ADR 0032).
     `self` (a cycle error says so).
   - `self.x` and the built object rely on IDE support for `Selectable`.
   - `Override[Deps]` always needs the type argument.
-  - No modules yet; they would work at runtime, since A knows which field it is computing.
+- Modules: a field of type `View[DbDeps]` takes `module(DbModule.base(...))`. A has no macro, but
+  its runtime knows which field it is computing and ties the sub-knot focused through it (ADR 0033);
+  cycle messages show the module path (`db.userRepo (base)`). See `ModulesDemo`.
 
 ### B: generated delegate for traits (`b/`)
 
@@ -92,8 +94,10 @@ lazy that way.
   - The domain trait carries plumbing: the `using Upper[...]` parameter and one `= inherited` line
     per member. Mocks need an `Upper` too.
   - Checking that trait members are `= inherited` needs `-Yretain-trees` (ADR 0031).
-  - Only object literals as input; no named tuples, no modules yet (possible: `module(...)` typed as
-    the member and rewritten by the macro).
+  - Only object literals as input; no named tuples.
+  - Modules work as `override lazy val db = module(DbModule.base(...))`: `module(...)` is typed as
+    the member and the macro rewrites it (ADR 0034). A `module(...)` that escapes the macro (nested
+    inside another expression) only fails at runtime.
   - Needs JDK 25.
 
 ### D: B plus named tuples, modules and full cycle handling (`d/`, front-runner)
