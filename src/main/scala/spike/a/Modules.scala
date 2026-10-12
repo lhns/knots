@@ -12,7 +12,7 @@ import scala.NamedTuple.AnyNamedTuple
 // wraps an Override and needs the layer below. A base accepts only BaseModule.
 class Module[S <: AnyNamedTuple] private[a] (val layer: Override[S]) {
   private[a] def tie(prefix: String, self: () => View[S], upper: () => View[S]): View[S] = layer match {
-    case base: Overridable[S] => Overridable.tie(prefix, base.layers, Knot.Complete(base.fields, self))
+    case base: Overridable[S] => Overridable.tie(prefix, base.layers, Knot.Complete(base.base, self))
     case _ => Overridable.tie(prefix, layer.layers, Knot.Passing(self, upper))
   }
 }
@@ -23,14 +23,3 @@ final class BaseModule[S <: AnyNamedTuple](layer: Overridable[S]) extends Module
 def module[S <: AnyNamedTuple](layer: Overridable[S])(using Self[?]): BaseModule[S] = new BaseModule(layer)
 
 def module[S <: AnyNamedTuple](layer: Override[S])(using Self[?]): Module[S] = new Module(layer)
-
-// The type a field of type X accepts in a base literal / in an override literal.
-type BaseField[X] = X match {
-  case View[s] => View[s] | BaseModule[s]
-  case _ => X
-}
-
-type OverrideField[X] = X match {
-  case View[s] => View[s] | Module[s]
-  case _ => X
-}
