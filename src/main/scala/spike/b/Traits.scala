@@ -2,8 +2,6 @@ package spike.b
 
 import cats.Monoid
 
-import scala.reflect.ClassTag
-
 trait Self[A] {
   def self: A
 }
@@ -24,9 +22,9 @@ opaque type Override[A] = Super[A] => A
 
 object Overridable {
   // `o` is an object literal defining every abstract member of A: `new { lazy val dep1 = ... }`.
-  inline def apply[A](inline o: Self[A] ?=> Any)(using ct: ClassTag[A]): Overridable[A] = {
+  inline def apply[A](inline o: Self[A] ?=> Any): Overridable[A] = {
     Derive.check[A, Self[A]](o, complete = true)
-    s => Derive.implement[A](ct.runtimeClass, o(using s).asInstanceOf[AnyRef], None)
+    s => Derive.derive[A, Self[A]](o, s, withUpper = false)
   }
 
   // Needs at least one override so a single argument always means "create" above;
@@ -49,9 +47,9 @@ object Overridable {
 
 object Override {
   // `o` is an object literal defining only the overridden members; the rest come from `upper`.
-  inline def apply[A](inline o: Super[A] ?=> Any)(using ct: ClassTag[A]): Override[A] = {
+  inline def apply[A](inline o: Super[A] ?=> Any): Override[A] = {
     Derive.check[A, Super[A]](o, complete = false)
-    s => Derive.implement[A](ct.runtimeClass, o(using s).asInstanceOf[AnyRef], Some(() => s.upper))
+    s => Derive.derive[A, Super[A]](o, s, withUpper = true)
   }
 
   // `x |+| y` stacks y on top of x: y's `upper` is x's result. `empty` passes `upper` through.
