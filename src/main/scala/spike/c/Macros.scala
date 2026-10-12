@@ -19,7 +19,8 @@ object Macros {
     val member = enclosingMember(Symbol.spliceOwner)
     if member.owner.methodMember(member.name).size > 1 then
       report.errorAndAbort(s"inherited doesn't support the overloaded member ${member.name}")
-    val upper = TypeRepr.of[Upper].appliedTo(member.owner.typeRef).asType match {
+    // The trait's own type with its type parameters applied (typeRef alone would be unapplied).
+    val upper = TypeRepr.of[Upper].appliedTo(This(member.owner).tpe.widen).asType match {
       case '[s] => Expr.summon[s] match {
         case Some(s) => Select.unique(s.asTerm, "upper")
         case None => report.errorAndAbort(s"inherited needs a given Upper[${member.owner.name}], e.g. a `using` trait parameter")
