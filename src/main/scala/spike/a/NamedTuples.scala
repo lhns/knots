@@ -1,8 +1,8 @@
 package spike.a
 
-import scala.NamedTuple.{AnyNamedTuple, Names}
+import scala.NamedTuple.{AnyNamedTuple, DropNames, Names}
 import scala.collection.mutable
-import scala.compiletime.constValueTuple
+import scala.compiletime.{constValue, constValueTuple, erasedValue, error, summonFrom}
 
 trait Self[F <: AnyNamedTuple] {
   def self: View[F]
@@ -26,103 +26,120 @@ final class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable 
   def selectDynamic(name: String): Any = resolve(name)
 }
 
-final class Setter[F <: AnyNamedTuple] extends Selectable {
-  type Fields = NamedTuple.Map[F, [X] =>> Field[F, X]]
+// The type of field N in F; doesn't reduce if F has no field N.
+type FieldType[F <: AnyNamedTuple, N] = FieldTypeOf[Names[F], DropNames[F], N]
 
-  def selectDynamic(name: String): Field[F, Any] = Field(name)
+type FieldTypeOf[Ns <: Tuple, Vs <: Tuple, N] <: Any = (Ns, Vs) match {
+  case (N *: _, v *: _) => v
+  case (_ *: ns, _ *: vs) => FieldTypeOf[ns, vs, N]
 }
 
-final class Field[F <: AnyNamedTuple, X](name: String) {
-  def :=(value: Super[F] ?=> X): Binding[F] = Binding(name, s => value(using s))
-}
-
-final case class Binding[F <: AnyNamedTuple](name: String, value: Super[F] => Any)
-
-final case class Overridable[F <: AnyNamedTuple](
-  names: List[String],
-  base: Map[String, Self[F] => Any],
-  layers: Vector[Map[String, Super[F] => Any]]
-) {
-  def layer(bindings: (Setter[F] => Binding[F])*): Overridable[F] = {
-    val setter = Setter[F]()
-    copy(layers = layers :+ bindings.map(_(setter)).map(b => b.name -> b.value).toMap)
+// Every field of the override (names Ns, types Vs) must exist in F with a conforming type.
+inline def checkOverride[F <: AnyNamedTuple, Ns <: Tuple, Vs <: Tuple]: Unit =
+  inline erasedValue[(Ns, Vs)] match {
+    case _: (EmptyTuple, EmptyTuple) => ()
+    case _: ((n *: ns), (v *: vs)) =>
+      inline if !constValue[Tuple.Contains[Names[F], n]] then
+        error("override field is not in the base: " + constValue[n])
+      else inline if !conforms[v, FieldType[F, n]] then
+        error("override has the wrong type for field " + constValue[n])
+      else checkOverride[F, ns, vs]
   }
 
-  // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1.
-  def build: F = {
-    val top = layers.length
-    val caches = Vector.fill(top + 1)(mutable.Map.empty[String, Any])
-    val inProgress = mutable.LinkedHashSet.empty[(Int, String)]
-    lazy val views: Vector[View[F]] = Vector.tabulate(top + 1)(level => View[F](resolve(level, _)))
-
-    def definingLevel(level: Int, name: String): Int =
-      if level == 0 || layers(level - 1).contains(name) then level else definingLevel(level - 1, name)
-
-    def resolve(level: Int, name: String): Any = {
-      val l = definingLevel(level, name)
-      caches(l).getOrElse(name, compute(l, name))
-    }
-
-    def compute(level: Int, name: String): Any = {
-      val key = (level, name)
-      if inProgress.contains(key) then
-        val path = inProgress.toList.dropWhile(_ != key).map(_._2) :+ name
-        throw IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")
-      inProgress += key
-      try {
-        val value =
-          if level == 0 then base(name)(new Self[F] { def self = views(top) })
-          else layers(level - 1)(name)(new Super[F] {
-            def self = views(top)
-            def upper = views(level - 1)
-          })
-        caches(level)(name) = value
-        value
-      } finally inProgress -= key
-    }
-
-    Tuple.fromArray(names.map(views(top).selectDynamic).toArray[Any]).asInstanceOf[F]
-  }
+// Separate so V and T are type parameters: lowercase names in a summonFrom pattern would bind fresh types.
+inline def conforms[V, T]: Boolean = summonFrom {
+  case _: (V <:< T) => true
+  case _ => false
 }
+
+// A layer is evaluated as a unit: its fields can't reference each other via `self`.
+final case class Layer[F <: AnyNamedTuple](names: List[String], values: Super[F] => Tuple)
+
+final class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
+
+object Override {
+  // `Override[F]` fixes F; the builder's `apply` then infers the literal's type O.
+  def apply[F <: AnyNamedTuple]: OverrideBuilder[F] = OverrideBuilder()
+}
+
+final class OverrideBuilder[F <: AnyNamedTuple] {
+  inline def apply[O <: AnyNamedTuple](o: Super[F] ?=> O): Override[F] = {
+    checkOverride[F, Names[O], DropNames[O]]
+    val names = constValueTuple[Names[O]].toList.asInstanceOf[List[String]]
+    new Override(Vector(Layer[F](names, s => o(using s).asInstanceOf[Tuple])))
+  }
+
+  // Stacked in order: each override's `upper` is the result of the ones before it.
+  def apply(first: Override[F], second: Override[F], more: Override[F]*): Override[F] =
+    new Override((first +: second +: more).toVector.flatMap(_.layers))
+}
+
+final class Overridable[F <: AnyNamedTuple](
+  val names: List[String],
+  val base: Map[String, Self[F] => Any],
+  val layers: Vector[Layer[F]]
+)
 
 object Overridable {
   inline def apply[F <: AnyNamedTuple](defs: Defs[F]): Overridable[F] = {
     val names = constValueTuple[Names[F]].toList.asInstanceOf[List[String]]
     val fns = defs.toTuple.toList.map(f => (s: Self[F]) => f.asInstanceOf[Self[F] ?=> Any](using s))
-    Overridable(names, names.zip(fns).toMap, Vector.empty)
+    new Overridable(names, names.zip(fns).toMap, Vector.empty)
   }
-}
 
-object Demo {
-  case class Dependency(name: String)
+  def apply[F <: AnyNamedTuple](base: Overridable[F], ovr: Override[F], more: Override[F]*): Overridable[F] =
+    new Overridable(base.names, base.base, base.layers ++ (ovr +: more).flatMap(_.layers))
 
-  type MainDeps = (dep1: Dependency, dep2: Dependency, dep3: Dependency)
+  // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1.
+  def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): F = {
+    val layers = base.layers ++ overrides.flatMap(_.layers)
+    val top = layers.length
+    val fieldCache = mutable.Map.empty[String, Any]
+    val layerCache = mutable.Map.empty[Int, Map[String, Any]]
+    val inProgress = mutable.LinkedHashMap.empty[(Int, String), Unit]
+    lazy val views: Vector[View[F]] = Vector.tabulate(top + 1)(level => View[F](resolve(level, _)))
 
-  val base = Overridable[MainDeps]((
-    dep1 = Dependency("base1"),
-    dep2 = Dependency("base2"),
-    dep3 = {
-      println(s"dep3 initialized using ${self.dep2}")
-      Dependency("base3")
-    },
-  ))
+    def label(level: Int, name: String) = if level == 0 then s"$name (base)" else s"$name (layer $level)"
 
-  def main(args: Array[String]): Unit = {
-    val b: MainDeps = base.build
-    println("base.dep1 " ++ b.dep1.toString)
-    println("base.dep2 " ++ b.dep2.toString)
-    println("base.dep3 " ++ b.dep3.toString)
+    def definingLevel(level: Int, name: String): Int =
+      if level == 0 || layers(level - 1).names.contains(name) then level else definingLevel(level - 1, name)
 
-    val decorated: MainDeps = base
-      .layer(_.dep2 := {
-        println(s"dep2 initialized using ${self.dep1}")
-        Dependency("overridden2")
-      })
-      .layer(_.dep2 := Dependency(s"wrapped(${upper.dep2.name})"))
-      .build
+    // Base fields are guarded per field, layers as a whole.
+    def guarded[T](level: Int, name: String)(compute: => T): T = {
+      val clash = inProgress.keys.find((l, n) => l == level && (level != 0 || n == name))
+      clash.foreach { start =>
+        val cycle = inProgress.keys.toList.dropWhile(_ != start)
+        val path = cycle.map(label) :+ label(level, name)
+        val hint =
+          if level != 0 && cycle.forall(_._1 == level) then " (a layer is evaluated as a unit; its fields can't use each other via self)"
+          else ""
+        throw IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}$hint")
+      }
+      inProgress((level, name)) = ()
+      try compute
+      finally inProgress.remove((level, name))
+    }
 
-    println("decorated.dep1 " ++ decorated.dep1.toString)
-    println("decorated.dep2 " ++ decorated.dep2.toString)
-    println("decorated.dep3 " ++ decorated.dep3.toString)
+    def resolve(level: Int, name: String): Any = definingLevel(level, name) match {
+      case 0 =>
+        fieldCache.getOrElse(name, guarded(0, name) {
+          val value = base.base(name)(new Self[F] { def self = views(top) })
+          fieldCache(name) = value
+          value
+        })
+      case l =>
+        layerCache.getOrElse(l, guarded(l, name) {
+          val layer = layers(l - 1)
+          val tuple = layer.values(new Super[F] {
+            def self = views(top)
+            def upper = views(l - 1)
+          })
+          val values = layer.names.zip(tuple.productIterator).toMap
+          layerCache(l) = values
+          values
+        })(name)
+    }
+
+    Tuple.fromArray(base.names.map(views(top).selectDynamic).toArray[Any]).asInstanceOf[F]
   }
 }
