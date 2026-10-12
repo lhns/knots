@@ -17,9 +17,11 @@ def upper[A](using s: Super[A]): A = s.upper
 
 // Opaque (over plain functions: context function types can't be opaque) so a value isn't
 // auto-applied like a bare context function: `val o = Override(...)` needs no type ascription.
-opaque type Overridable[A] = Self[A] => A
-
 opaque type Override[A] = Super[A] => A
+
+// A base is an override that doesn't need `upper`, so it can stand wherever an Override can,
+// e.g. on top of another base to replace it completely.
+opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
   // `o` is `new A { ... }` overriding every member of A (checked at compile time). A's
@@ -34,13 +36,12 @@ object Overridable {
     def upper: A = throw new IllegalStateException("the base has no upper")
   }
 
-  // Needs at least one override so a single argument always means "create" above;
-  // overload resolution can't tell a context-function literal from a value otherwise.
-  def apply[A](base: Overridable[A], ovr: Override[A], more: Override[A]*): Overridable[A] =
-    stack(base, Override.monoid[A].combineAll(ovr +: more))
+  // Layering on a base keeps it a base (it still needs no upper); Override's monoid alone
+  // would widen the result to Override.
+  extension [A](base: Overridable[A]) def |+|(ovr: Override[A]): Overridable[A] = stack(base, ovr)
 
   def build[A](base: Overridable[A], overrides: Override[A]*): A = {
-    val knot = Overridable(base, Override.monoid[A].combineAll(overrides))
+    val knot = stack(base, Override.monoid[A].combineAll(overrides))
     var r: A | Null = null
     r = knot(new Self[A] {
       def self: A = r match {

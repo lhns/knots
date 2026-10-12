@@ -46,7 +46,7 @@ object Demo {
   def main(args: Array[String]): Unit = {
     show("base", Overridable.build(base))
     show("flat", Overridable.build(base, o1, o2))
-    show("layered", Overridable.build(Overridable(base, o1), o2))
+    show("layered", Overridable.build(base |+| o1, o2))
     show("composed", Overridable.build(base, o1 |+| o2))
   }
 }
