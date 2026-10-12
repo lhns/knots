@@ -9,18 +9,20 @@ import scala.NamedTuple.AnyNamedTuple
 // override is a nested Override. The field's value is the module's lazy View.
 //
 // A BaseModule is complete (a base layer, which may replace a module in an override); a plain Module
-// is an Override and needs the layer below. A base accepts only BaseModule.
-class Module[S <: AnyNamedTuple] private[a] (val base: Overridable[S] | Null, val overrides: Override[S]) {
-  private[a] def tie(prefix: String, self: () => Any, upper: (() => Any) | Null): View[S] =
-    Overridable.tie[S](prefix, if base == null then null else base.base, overrides.layers, self, upper)
+// wraps an Override and needs the layer below. A base accepts only BaseModule.
+class Module[S <: AnyNamedTuple] private[a] (val layer: Override[S]) {
+  private[a] def tie(prefix: String, self: () => View[S], upper: () => View[S]): View[S] = layer match {
+    case base: Overridable[S] => Overridable.tie(prefix, base.layers, Knot.Complete(base.fields, self))
+    case _ => Overridable.tie(prefix, layer.layers, Knot.Passing(self, upper))
+  }
 }
 
-final class BaseModule[S <: AnyNamedTuple](layer: Overridable[S]) extends Module[S](layer, layer.overrides)
+final class BaseModule[S <: AnyNamedTuple](layer: Overridable[S]) extends Module[S](layer)
 
 // `using Self[?]` is only a scope guard: module(...) is usable inside a layer literal (Upper <: Self).
 def module[S <: AnyNamedTuple](layer: Overridable[S])(using Self[?]): BaseModule[S] = new BaseModule(layer)
 
-def module[S <: AnyNamedTuple](layer: Override[S])(using Self[?]): Module[S] = new Module(null, layer)
+def module[S <: AnyNamedTuple](layer: Override[S])(using Self[?]): Module[S] = new Module(layer)
 
 // The type a field of type X accepts in a base literal / in an override literal.
 type BaseField[X] = X match {

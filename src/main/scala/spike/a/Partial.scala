@@ -28,15 +28,13 @@ object SubsetOf {
       case _: ((n *: ns), (v *: vs)) =>
         inline if !constValue[Tuple.Contains[Names[F], n]] then
           error("unknown field: " + constValue[n])
-        else inline if conforms[v, Override[?]] || conforms[v, Overridable[?]] then
-          error("field " + constValue[n] + " is a module: wrap the layer in module(...)")
-        else inline if !conforms[v, OverrideField[FieldType[F, n]]] then
+        else inline if !conforms[v, FieldType[F, n]] then
           error("wrong type for field " + constValue[n])
         else check[F, ns, vs]
     }
 
   // Separate so V and T are type parameters: lowercase names in a summonFrom pattern would bind fresh types.
-  private inline def conforms[V, T]: Boolean = summonFrom {
+  private[a] inline def conforms[V, T]: Boolean = summonFrom {
     case _: (V <:< T) => true
     case _ => false
   }

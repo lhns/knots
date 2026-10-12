@@ -46,7 +46,9 @@ deferred context functions. An override is a partial literal, `Override[Deps]((d
 checked by type-level code (`SubsetOf`, reusable on its own together with `Partial`). `self`,
 `upper` and the result of `build` are `View`s, a `Selectable` over the tuple whose fields are
 computed on access; `toTuple` gives the plain tuple. Base fields and override layers are cached in
-D's `Cell` (ADR 0032).
+D's `Cell` (ADR 0032). `Overridable <: Override` as in the other spikes (a base can replace
+everything below it); the override check (`Checks.scala`) rejects raw layers for module fields and
+reserved field names (`selectDynamic`, `toTuple`, ...), while `Partial`/`SubsetOf` stay reusable on their own.
 
 - Pros: no generated code at all; the checks are ordinary type-level Scala.
 - Cons:

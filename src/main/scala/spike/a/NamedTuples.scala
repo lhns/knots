@@ -2,9 +2,13 @@ package spike.a
 
 import cats.Monoid
 
-import scala.NamedTuple.{AnyNamedTuple, Names}
+import scala.NamedTuple.AnyNamedTuple
 import scala.annotation.implicitNotFound
-import scala.compiletime.constValueTuple
+
+// Type safety lives at the literal boundary: `Defs` types a base literal, `SubsetOf` (via `OverrideOf`)
+// checks an override literal. Past that, everything is string-keyed (field names, `Map[String, Any]`,
+// `View.selectDynamic`) and cast back to what the literals already guaranteed, by design: it keeps the
+// runtime free of macros and generated code.
 
 @implicitNotFound("self is only available inside an Overridable[...](...) or Override[...](...) literal")
 trait Self[F <: AnyNamedTuple] {
@@ -40,7 +44,9 @@ extension [F <: AnyNamedTuple](view: View[F])
 // `values` has the overridden fields only, by name.
 final case class Layer[F <: AnyNamedTuple](names: List[String], values: Upper[F] => Map[String, Any])
 
-final class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
+// Layers on top of whatever is below. An Overridable (a base, ADR 0008) is an Override that brings
+// its own fields, so it stands wherever an override can: layered on something, it replaces everything below.
+class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
 
 object Override {
   // `Override[F]` fixes F; the builder's `apply` then infers the literal's type O.
@@ -49,77 +55,96 @@ object Override {
   // `x |+| y` is y extending x: y's `upper` (its super) is x's result.
   given [F <: AnyNamedTuple]: Monoid[Override[F]] with {
     def empty: Override[F] = new Override(Vector.empty)
-    def combine(x: Override[F], y: Override[F]): Override[F] = new Override(x.layers ++ y.layers)
+    def combine(x: Override[F], y: Override[F]): Override[F] = (x, y) match {
+      case (base: Overridable[F], _) => base |+| y
+      case (_, base: Overridable[F]) => base
+      case _ => new Override(x.layers ++ y.layers)
+    }
   }
 }
 
 final class OverrideBuilder[F <: AnyNamedTuple] {
-  inline def apply[O <: AnyNamedTuple](o: Upper[F] ?=> O)(using O SubsetOf F): Override[F] = {
-    new Override(Vector(Layer[F](fieldNames[O], s => {
-      val partial = Partial[F](o(using s))
-      fieldNames[F].zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
-    })))
+  inline def apply[O <: AnyNamedTuple](o: Upper[F] ?=> O)(using OverrideOf[O, F]): Override[F] = {
+    val names = fieldNames[O]
+    new Override(Vector(Layer[F](names, s => names.zip(o(using s).asInstanceOf[Product].productIterator).toMap)))
   }
 }
 
 final class Overridable[F <: AnyNamedTuple](
-  val names: List[String],
-  val base: Map[String, Self[F] => Any],
-  val overrides: Override[F]
-)
+  val fields: Map[String, Self[F] => Any],
+  layers: Vector[Layer[F]]
+) extends Override[F](layers)
+
+// How a knot gets its `self` and what is below its first layer.
+private[a] enum Knot[F <: AnyNamedTuple] {
+  // The top-level knot: its own result is `self`.
+  case Root(base: Map[String, Self[F] => Any])
+  // A complete module: `self` is the parent's final view of the module field.
+  case Complete(base: Map[String, Self[F] => Any], self: () => View[F])
+  // An override module has no base: level 0 is the parent's view of the layer below.
+  case Passing(self: () => View[F], upper: () => View[F])
+}
 
 object Overridable {
   inline def apply[F <: AnyNamedTuple](defs: Defs[F]): Overridable[F] = {
+    rejectReservedNames[F]
     val fns = defs.toTuple.toList.map(f => (s: Self[F]) => f.asInstanceOf[Self[F] ?=> Any](using s))
-    new Overridable(fieldNames[F], fieldNames[F].zip(fns).toMap, Monoid.empty)
+    new Overridable(fieldNames[F].zip(fns).toMap, Vector.empty)
   }
 
-  // Layering on a base keeps it a base: `base |+| o1 |+| o2`.
-  extension [F <: AnyNamedTuple](base: Overridable[F]) def |+|(ovr: Override[F]): Overridable[F] =
-    new Overridable(base.names, base.base, Monoid.combine(base.overrides, ovr))
+  // Layering on a base keeps it a base: `base |+| o1 |+| o2`. A base on the right replaces everything.
+  extension [F <: AnyNamedTuple](base: Overridable[F]) def |+|(ovr: Override[F]): Overridable[F] = ovr match {
+    case replacement: Overridable[F] => replacement
+    case _ => new Overridable(base.fields, base.layers ++ ovr.layers)
+  }
 
   def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): View[F] = {
-    val knot = base |+| Monoid.combineAll(overrides)
-    tie("", knot.base, knot.overrides.layers, null, null)
+    val all = base |+| Monoid.combineAll(overrides)
+    tie("", all.layers, Knot.Root(all.fields))
   }
+
+  private val noLayerBelow: () => Nothing = () => throw new IllegalStateException("there is no layer below the base")
 
   // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1. Nothing is
   // computed here: each base field and each layer is a Cell, computed on first access. A layer is
   // computed as a whole, so its fields can't use each other via `self`.
   //
-  // A module (Modules.scala) is tied by the same code, focused through its field of the parent:
-  // `outerSelf` is the parent's final view of that field (the module's `self`), `outerUpper` the
-  // view of the layer below (level 0 of an Override module has no base and passes through to it).
-  // Module values found in a base field or a layer are tied this way when the field is computed.
-  private[a] def tie[F <: AnyNamedTuple](
-    prefix: String,
-    base: Map[String, Self[F] => Any] | Null,
-    layers: Vector[Layer[F]],
-    outerSelf: (() => Any) | Null,
-    outerUpper: (() => Any) | Null
-  ): View[F] = {
+  // A module (Modules.scala) is tied by the same code, focused through its field of the parent (see
+  // Knot). Module values found in a base field or a layer are tied this way when the field is computed.
+  private[a] def tie[F <: AnyNamedTuple](prefix: String, layers: Vector[Layer[F]], knot: Knot[F]): View[F] = {
     val top = layers.length
     lazy val views: Vector[View[F]] = Vector.tabulate(top + 1)(level => View[F](resolve(level, _)))
-    def finalView: View[F] = if outerSelf == null then views(top) else outerSelf().asInstanceOf[View[F]]
+    def finalView: View[F] = knot match {
+      case Knot.Root(_) => views(top)
+      case Knot.Complete(_, self) => self()
+      case Knot.Passing(self, _) => self()
+    }
 
     def definingLevel(level: Int, name: String): Int =
       if level == 0 || layers(level - 1).names.contains(name) then level else definingLevel(level - 1, name)
 
     def resolve(level: Int, name: String): Any = definingLevel(level, name) match {
-      case 0 if base != null => baseCells(name).get
-      case 0 if outerUpper != null => outerUpper().asInstanceOf[View[F]].selectDynamic(name)
-      case 0 => throw new IllegalStateException(s"no value for $prefix$name: an Override module has no base")
+      case 0 => knot match {
+        case Knot.Passing(_, upper) => upper().selectDynamic(name)
+        case _ => baseCells(name).get
+      }
       case l => layerCells(l - 1).get.asInstanceOf[Map[String, Any]](name)
     }
 
     // A module's sub-knot sees the final view of its field as `self` and the layer below's as `upper`.
-    def focus(value: Any, name: String, upper: (() => Any) | Null): Any = value match {
-      case m: Module[?] => m.tie(s"$prefix$name.", () => finalView.selectDynamic(name), upper)
+    def focus(value: Any, name: String, upper: () => View[F]): Any = value match {
+      case m: Module[s] =>
+        m.tie(s"$prefix$name.", () => finalView.selectDynamic(name).asInstanceOf[View[s]],
+          () => upper().selectDynamic(name).asInstanceOf[View[s]])
       case v => v
     }
 
-    lazy val baseCells = base.nn.map { (name, fn) =>
-      name -> Cell(s"$prefix$name (base)", () => focus(fn(new Self[F] { def self = finalView }), name, null))
+    lazy val baseCells = (knot match {
+      case Knot.Root(base) => base
+      case Knot.Complete(base, _) => base
+      case Knot.Passing(_, _) => Map.empty[String, Self[F] => Any]
+    }).map { (name, fn) =>
+      name -> Cell(s"$prefix$name (base)", () => focus(fn(new Self[F] { def self = finalView }), name, noLayerBelow))
     }
     lazy val layerCells = layers.zipWithIndex.map { (layer, i) =>
       val l = i + 1
@@ -127,7 +152,7 @@ object Overridable {
         layer.values(new Upper[F] {
           def self = finalView
           def upper = views(l - 1)
-        }).map { (n, v) => n -> focus(v, n, () => views(l - 1).selectDynamic(n)) }
+        }).map { (n, v) => n -> focus(v, n, () => views(l - 1)) }
       }, " (a layer is evaluated as a unit; its fields can't use each other via self)")
     }
 
