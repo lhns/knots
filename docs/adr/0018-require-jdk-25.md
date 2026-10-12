@@ -14,4 +14,4 @@ Build and run on JDK 25+; build.sbt fails early with "needs JDK 25+ for ScopedVa
 
 ## Consequences
 
-Users on JDK 21 can't use the library (spike E runs on 21, but isn't the chosen design). IDE project SDKs must be 25+.
+Users on JDK 21 can't use the library. Spikes A to D need JDK 25; only spike E runs on 21, but it isn't the chosen design. IDE project SDKs must be 25+.

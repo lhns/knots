@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12, commit 2365192, spike C)
+Accepted (2026-10-12, commit 2365192, spike C); the consequence on cycles is superseded by 0030
 
 ## Context
 

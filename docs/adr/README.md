@@ -31,3 +31,6 @@ One file per decision, reconstructed from the commits and the design discussion.
 - [0027. Always compile with -Xcheck-macros](0027-always-check-macros.md)
 - [0028. Explore designs as parallel spikes on one branch](0028-explore-with-parallel-spikes.md)
 - [0029. Make the partial named-tuple check reusable](0029-reusable-partial-named-tuples.md)
+- [0030. Give spike C cycle detection through a generated wrapper](0030-cells-for-spike-c.md)
+- [0031. Compile with -Yretain-trees](0031-retain-trees.md)
+- [0032. Spike A's build returns a lazy View](0032-lazy-view-result-in-spike-a.md)

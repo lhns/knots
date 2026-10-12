@@ -33,28 +33,28 @@ that uses `self.dep2` must see the overridden `dep2`.
 | Target | named tuple | trait | trait with `using Upper` | trait or named tuple (`View`) | trait or named tuple (`View`) |
 | Override input | partial named-tuple literal | object literal, class instance, complete instance | `new T { override ... }` | named-tuple literal, object literal, class instance, named-tuple value, complete instance | same as D |
 | Who implements unsupplied members | runtime lookup by field name | macro-generated delegate class | trait defaults (`= inherited`) | macro-generated delegate class | macro-generated delegate class |
-| Laziness | each override layer as a whole | per field (`Cell`) | your own `lazy val`s | per field (`Cell`) | per field (`Cell`) |
-| Cycle detection | yes, single thread | yes (`ScopedValue`), single thread | no, a cycle hangs | yes (`ScopedValue` + wait-for graph) | yes (explicit path + wait-for graph), with gaps |
-| Modules (nested sets) | no | no | no | yes | yes |
-| Macros | none, only type-level code | generates a class | checks only | generates a class | generates a class |
-| JDK | 21+ | 25+ | 21+ | 25+ | 21+ |
+| Laziness | per base field, each override layer as a whole (`Cell`) | per field (`Cell`) | per overridden member (`Cell`) | per field (`Cell`) | per field (`Cell`) |
+| Cycle detection | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | explicit path + wait-for graph, with gaps |
+| Modules (nested sets) | no (possible at runtime) | yes | no (possible) | yes | yes |
+| Macros | none, only type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
+| JDK | 25+ | 25+ | 25+ | 25+ | 21+ |
 
 ### A: named tuples, no macros (`a/`)
 
 `type Deps = (dep1: Dependency, ...)`. The base is a full named-tuple literal whose fields become
 deferred context functions. An override is a partial literal, `Override[Deps]((dep2 = ...))`,
-checked by type-level code (`SubsetOf`, reusable on its own together with `Partial`). `self` and
-`upper` are `View`s, a `Selectable` over the tuple. `build` returns the plain named tuple.
+checked by type-level code (`SubsetOf`, reusable on its own together with `Partial`). `self`,
+`upper` and the result of `build` are `View`s, a `Selectable` over the tuple whose fields are
+computed on access; `toTuple` gives the plain tuple. Base fields and override layers are cached in
+D's `Cell` (ADR 0032).
 
-- Pros: no generated code at all; the result is a plain tuple; the checks are ordinary type-level
-  Scala.
+- Pros: no generated code at all; the checks are ordinary type-level Scala.
 - Cons:
   - An override layer is evaluated as a whole, so fields of one override can't use each other via
-    `self`.
-  - `build` computes every field, which contradicts the lazy core decision (ADR 0015).
-  - Its caches are plain maps.
-  - `self.x` relies on IDE support for `Selectable`.
+    `self` (a cycle error says so).
+  - `self.x` and the built object rely on IDE support for `Selectable`.
   - `Override[Deps]` always needs the type argument.
+  - No modules yet; they would work at runtime, since A knows which field it is computing.
 
 ### B: generated delegate for traits (`b/`)
 
@@ -63,31 +63,38 @@ trait: members you supply forward to your input, the rest to `upper`. Inputs are
 (`new { def dep2 = ... }`), instances of named classes, or complete instances. Each supplied member
 is cached in a `Cell` with `ScopedValue`-based cycle detection.
 
+Modules work like in D, given as object-literal or class members:
+`new { def db = module(DbModule.base(self.config.dbUrl)) }` (see `ModulesDemo`).
+
 - Pros:
   - Nominal types everywhere, so the IDE behaves as usual.
   - No delegate boilerplate.
   - A bare `dep1` without `self.` doesn't compile.
-  - The simplest of the macro spikes.
+  - Modules and D's cycle handling, with a smaller macro than D.
 - Cons:
-  - No named-tuple literals and no modules.
-  - A cycle entered from two threads at once can deadlock (no wait-for graph).
+  - No named-tuple literals (that is D).
   - Needs JDK 25.
 
 ### C: the trait is its own delegate (`c/`)
 
 `trait Deps(using Upper[Deps]) { def dep1: Dependency = inherited; ... }`, where `inherited` is a
 small macro expanding to `upper.dep1`. Overrides are real subclasses:
-`Override[Deps](new Deps { override lazy val dep2 = ... })`. Macros only check things: the base
-overrides everything and doesn't use `upper`, and no member is used bare.
+`Override[Deps](new Deps { override lazy val dep2 = ... })`. The macro checks that the base overrides
+everything and doesn't use `upper`, that no member is used bare, and that every concrete trait
+member is exactly `= inherited`. It wraps your literal in a generated class whose overridden members
+go through D's `Cell`, so cycles are detected like in D (ADR 0030); a strict `override val` becomes
+lazy that way.
 
 - Pros:
   - The most native IDE experience ("override member" completion, typos show as you type).
-  - No generated classes and no runtime machinery.
+  - Your literal stays a real subclass; the wrapper only adds caching and cycle detection.
 - Cons:
   - The domain trait carries plumbing: the `using Upper[...]` parameter and one `= inherited` line
     per member. Mocks need an `Upper` too.
-  - No cycle detection, because members are your own `lazy val`s.
-  - Only object literals as input; no named tuples, no modules.
+  - Checking that trait members are `= inherited` needs `-Yretain-trees` (ADR 0031).
+  - Only object literals as input; no named tuples, no modules yet (possible: `module(...)` typed as
+    the member and rewritten by the macro).
+  - Needs JDK 25.
 
 ### D: B plus named tuples, modules and full cycle handling (`d/`, front-runner)
 
@@ -145,7 +152,9 @@ and `upper`, and each field computation gets its own copy. Object-literal member
   - robust recognition of named-tuple literals (statements before it are an error, more than 22
     fields stay lazy, `++` works);
   - one clear error for wrong inputs, and guards for unusual traits.
-- B and C don't have these.
+- Brought to A, B and C as far as they apply: D's `Cell` with the wait-for graph everywhere, lazy
+  `build` in A, modules in B, cycle detection in C, and the input checks, guards and messages in B
+  and C.
 - Remaining gaps in D: a cycle through work handed to another thread inside a computation
   (`executor.submit(...).get()`), complete instances (not cached, no cycle detection), a named
   class reading `self` in its constructor, very deep `upper` chains.
