@@ -2,9 +2,6 @@ package spike.b
 
 import cats.Monoid
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicReference
-
 trait Self[A] {
   def self: A
 }
@@ -76,40 +73,20 @@ private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
 // for the extent of a call and seen by everything it calls, without depending on thread identity.
 private val computing: ScopedValue[List[Cell]] = ScopedValue.newInstance()
 
-// Caches one generated member and detects dependency cycles: asking for a member that the current
-// computation is already in the middle of fails with the path, where a lazy val would wait on itself
-// forever. Other callers wait for the value.
-final class Cell(val name: String) {
-  private enum State {
-    case Empty
-    case Pending(done: CountDownLatch)
-    case Done(value: Any)
-  }
-  private val state = new AtomicReference[State](State.Empty)
+// Caches one generated member and detects dependency cycles. The value is a lazy val: computed once,
+// other callers wait, retried after an exception. It is computed with `computing` extended by this
+// cell, so asking for a member the current computation is already in the middle of fails with the
+// path before reaching the lazy val, which would otherwise wait on itself forever.
+final class Cell(val name: String, compute: () => Any) {
+  private lazy val value: Any = ScopedValue.where(computing, current :+ this).call(() => compute())
 
-  def get(compute: => Any): Any = {
-    val path = if computing.isBound then computing.get else Nil
+  def get: Any = {
+    val path = current
     if path.contains(this) then throw new CycleException(path.dropWhile(_ ne this).map(_.name) :+ name)
-    state.get match {
-      case State.Done(value) => value
-      case State.Pending(done) =>
-        done.await()
-        get(compute)
-      case State.Empty =>
-        val done = new CountDownLatch(1)
-        if !state.compareAndSet(State.Empty, State.Pending(done)) then get(compute)
-        else
-          try {
-            val value = ScopedValue.where(computing, path :+ this).call(() => compute)
-            state.set(State.Done(value))
-            value
-          } catch {
-            case e: Throwable =>
-              state.set(State.Empty)
-              throw e
-          } finally done.countDown()
-    }
+    value
   }
 }
+
+private def current: List[Cell] = if computing.isBound then computing.get else Nil
 
 final class CycleException(path: List[String]) extends IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")

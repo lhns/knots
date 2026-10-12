@@ -133,8 +133,8 @@ object Macros {
         val cell = cls.declaredField(cellName(m))
         resultType(target.memberType(m)).asType match {
           case '[t] => List(
-            ValDef(cell, Some('{ new Cell(${ Expr(m.name) }) }.asTerm.changeOwner(cell))),
-            DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell] }.get(${ forward(m, Nil).asExprOf[t] }).asInstanceOf[t] }.asTerm.changeOwner(get))))
+            ValDef(cell, Some('{ new Cell(${ Expr(m.name) }, () => ${ forward(m, Nil).asExprOf[t] }) }.asTerm.changeOwner(cell))),
+            DefDef(get, _ => Some('{ ${ Select(This(cls), cell).asExprOf[Cell] }.get.asInstanceOf[t] }.asTerm.changeOwner(get))))
         }
       }
     }
