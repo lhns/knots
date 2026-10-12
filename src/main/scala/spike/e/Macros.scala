@@ -92,59 +92,59 @@ object Macros {
       case Expression(term: Term) // a named-tuple element or an object literal member's body
       case FromValue(read: Term => Term) // read from the argument's value, see `valueDefs`
     }
-    var valueDefs = List.empty[Statement]
     // A value (an instance, a named tuple) is defined once: as a val if it doesn't use the context,
-    // otherwise as a method taking the context. `read(ctx)` then gets it.
-    def valueReader(value: Term): Term => Term = {
+    // otherwise as a method taking the context. Returns that definition and how to read it for a context.
+    def valueReader(value: Term): (Statement, Term => Term) = {
       val valueType = value.tpe.widen
       val usesContext = new TreeAccumulator[Boolean] {
         def foldTree(found: Boolean, tree: Tree)(owner: Symbol) = found || tree.symbol == param || foldOverTree(false, tree)(owner)
       }.foldTree(false, value)(owner)
       if !usesContext then {
         val sym = Symbol.newVal(owner, "value", valueType, Flags.EmptyFlags, Symbol.noSymbol)
-        valueDefs = List(ValDef(sym, Some(value.changeOwner(sym))))
-        _ => Ref(sym)
+        (ValDef(sym, Some(value.changeOwner(sym))), _ => Ref(sym))
       } else {
         val sym = Symbol.newMethod(owner, "value", MethodType(List("ctx"))(_ => List(TypeRepr.of[S]), _ => valueType))
-        valueDefs = List(DefDef(sym, argss => Some(withContext(value, argss.head.head.asInstanceOf[Term]).changeOwner(sym))))
-        ctx => Apply(Ref(sym), List(ctx))
+        (DefDef(sym, argss => Some(withContext(value, argss.head.head.asInstanceOf[Term]).changeOwner(sym))), ctx => Apply(Ref(sym), List(ctx)))
       }
     }
 
-    val supplied: Map[String, (TypeRepr, Position, Source)] = namedTupleLiteral(body).orElse(namedTupleFields(body.tpe)) match {
+    // name -> (type, position, source), plus the definition of the argument's value if it has one.
+    val inputs: (Map[String, (TypeRepr, Position, Source)], Option[Statement]) = namedTupleLiteral(body).orElse(namedTupleFields(body.tpe)) match {
       case Some(fs) =>
         literalElements(body, fs.length) match {
-          case Some(terms) => fs.zip(terms).map { case ((n, t), e) => n -> (t, e.pos, Source.Expression(e)) }.toMap
+          case Some(terms) => (fs.zip(terms).map { case ((n, t), e) => n -> (t, e.pos, Source.Expression(e)) }.toMap, None)
           case None =>
-            val read = valueReader(strip(body))
-            fs.zipWithIndex.map { case ((n, t), i) =>
+            val (definition, read) = valueReader(strip(body))
+            (fs.zipWithIndex.map { case ((n, t), i) =>
               n -> (t, o.asTerm.pos, Source.FromValue(ctx => '{ ${ read(ctx).asExprOf[Any] }.asInstanceOf[Product].productElement(${ Expr(i) }) }.asTerm))
-            }.toMap
+            }.toMap, Some(definition))
         }
       case None =>
         strip(body) match {
           case Block(List(literal: ClassDef), _) =>
             // An object literal: each member's body is computed on its own.
-            literal.body.collect {
+            (literal.body.collect {
               case d: Definition if !d.symbol.flags.is(Flags.Private) && !d.symbol.flags.is(Flags.Protected) &&
                 !d.symbol.flags.is(Flags.Synthetic) => d
             }.map { d =>
               d.symbol.name -> (resultType(literal.symbol.typeRef.memberType(d.symbol)), d.symbol.pos.getOrElse(o.asTerm.pos),
                 Source.Expression(checkLiteralMember(literal.symbol, d, o.asTerm.pos)))
-            }.toMap
+            }.toMap, None)
           case value =>
             val valueType = value.tpe.widen
             if valueType =:= TypeRepr.of[Object] then
               report.errorAndAbort(s"expected (name = ...), new { ... }, an instance of a class, or a ${target.show}", o)
-            val read = valueReader(value)
+            val (definition, read) = valueReader(value)
             // Only public members the class declares itself: inherited and compiler-generated ones are ignored.
-            (valueType.typeSymbol.declaredFields ++ valueType.typeSymbol.declaredMethods).filter { m =>
+            ((valueType.typeSymbol.declaredFields ++ valueType.typeSymbol.declaredMethods).filter { m =>
               !m.isClassConstructor && !m.flags.is(Flags.Private) && !m.flags.is(Flags.Protected) && !m.flags.is(Flags.Synthetic)
             }.map { m =>
               m.name -> (resultType(valueType.memberType(m)), m.pos.getOrElse(o.asTerm.pos), Source.FromValue(ctx => Select(read(ctx), m)))
-            }.toMap
+            }.toMap, Some(definition))
         }
     }
+
+    val (supplied, valueDef) = inputs
 
     // --- Checks: report every problem, but don't generate code from a mismatching argument. ---
 
@@ -237,7 +237,7 @@ object Macros {
       ) ++ fieldDefs ++ dispatchDef)
 
     val cells = Varargs(cellIndex.toList.sortBy(_._2).map((n, _) => '{ new Cell(${ Expr(n) }) }))
-    Block(valueDefs :+ classDef, newInstance(owner, '{ Nil }, '{ Array[Cell]($cells*) })).asExprOf[A]
+    Block(valueDef.toList :+ classDef, newInstance(owner, '{ Nil }, '{ Array[Cell]($cells*) })).asExprOf[A]
   }
 
   // An object literal member's body, checked: its members are computed one by one, so a body may only
