@@ -31,9 +31,12 @@ object Demo {
     }
   })
 
-  val o2 = Override[MainDependencies](new {
+  // A named class works too: it supplies the members it declares.
+  class Wrapped(using Super[MainDependencies]) {
     lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
-  })
+  }
+
+  val o2 = Override[MainDependencies](new Wrapped)
 
   def show(label: String, deps: MainDependencies): Unit = {
     println(s"$label.dep1 ${deps.dep1}")
