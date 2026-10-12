@@ -244,6 +244,44 @@ object Macros {
         super.traverseTree(tree)(owner)
       }
     }.traverseTree(literal)(anon)
+
+    // module(layer) as the whole body of an overriding member: the layer expression and the module
+    // overload called (Overridable's or Override's). `module` itself is the function reference.
+    val moduleSyms = Symbol.requiredModule("spike.c.Overridable$package").methodMember("module")
+    val overridableSym = TypeRepr.of[Overridable].typeSymbol
+    val baseModuleSym = moduleSyms.find(_.paramSymss.flatten.find(_.isTerm).get.termRef.widen.dealiasKeepOpaques match {
+      case AppliedType(tc, _) => tc.typeSymbol == overridableSym
+      case _ => false
+    }).get
+    case class ModuleCall(fn: Term, layer: Term)
+    def moduleCall(t: Term): Option[ModuleCall] = strip(t) match {
+      case Block(Nil, e) => moduleCall(e)
+      case Apply(Apply(TypeApply(fn, _), List(layer)), _) if moduleSyms.contains(fn.symbol) => Some(ModuleCall(fn, layer))
+      case _ => None
+    }
+    def moduleOf(d: Tree): Option[ModuleCall] = d match {
+      case v: ValDef if !v.symbol.flags.is(Flags.Mutable) => v.rhs.flatMap(moduleCall)
+      case m: DefDef if m.paramss.isEmpty => m.rhs.flatMap(moduleCall)
+      case _ => None
+    }
+    val moduleMembers = literal.body.collect {
+      case d: Definition if d.symbol.owner == anon && memberNames(d.symbol.name) && moduleOf(d).nonEmpty => d -> moduleOf(d).get
+    }
+    moduleMembers.foreach { (d, call) =>
+      if isBase && call.fn.symbol != baseModuleSym then
+        fail(s"${d.symbol.name}: a base needs a complete module (module(Overridable[...])), there is no layer below to override", call.fn.pos)
+    }
+    // Any other use of module(...) is an error. The layer of a module is not entered: it may hold
+    // literals of its own, which check their module(...) calls when they expand.
+    val okRefs = moduleMembers.map(_._2.fn)
+    new TreeTraverser {
+      override def traverseTree(tree: Tree)(owner: Symbol): Unit = tree match {
+        case t @ (Ident(_) | Select(_, _)) if moduleSyms.contains(t.symbol) && !okRefs.exists(_ eq t) =>
+          fail("module(...) must be the whole body of an overriding member (val, lazy val or def without parameters) in the literal", t.pos)
+        case Apply(Apply(TypeApply(fn, _), List(_)), _) if okRefs.exists(_ eq fn) => ()
+        case _ => super.traverseTree(tree)(owner)
+      }
+    }.traverseTree(literal)(anon)
     if failed then return '{ ??? }
 
     // --- The generated code. ---
@@ -262,7 +300,7 @@ object Macros {
 
     // The members A has and the literal declares (cached), or that must be implemented (the
     // abstract ones); the rest keep A's `= inherited` default.
-    final case class Field(m: Symbol, memberType: TypeRepr, impl: Option[Symbol], isCached: Boolean)
+    final case class Field(m: Symbol, memberType: TypeRepr, impl: Option[Symbol], isCached: Boolean, isModule: Boolean)
     // Taken from the moved class: moving copies its symbols (changeOwner), so the literal's own
     // would no longer be members of `partial`.
     val movedByName = publicDeclared(movedClass.symbol).groupBy(_.name)
@@ -271,12 +309,17 @@ object Macros {
       if impl.isEmpty && !m.flags.is(Flags.Deferred) then None
       else {
         val tpe = target.memberType(m)
-        Some(Field(m, tpe, impl, impl.nonEmpty && !hasParams(tpe)))
+        val isModule = impl.exists(i => movedClass.body.exists(d => d.symbol == i && moduleOf(d).nonEmpty))
+        Some(Field(m, tpe, impl, impl.nonEmpty && !hasParams(tpe), isModule))
       }
     }
-    // Strict vals of the literal that a Cell must compute lazily.
-    val strictVals = fields.filter(_.isCached).flatMap(_.impl).filter(s => s.isValDef && !s.flags.is(Flags.Lazy) && !s.flags.is(Flags.Mutable))
+    // Members whose body the Cell runs through a thunk: strict vals (the Cell must compute them
+    // lazily) and modules (the layer is the argument of module(...), evaluated in the literal's own
+    // scope; see `register`).
+    def isStrictVal(s: Symbol) = s.isValDef && !s.flags.is(Flags.Lazy) && !s.flags.is(Flags.Mutable)
+    val strictVals = fields.filter(f => f.isCached).flatMap(f => f.impl.filter(i => f.isModule || isStrictVal(i)))
     val strictIndex = strictVals.zipWithIndex.toMap
+    val moduleImpls = fields.filter(_.isModule).flatMap(_.impl).toSet
 
     val thunksSym = Option.when(strictVals.nonEmpty)(
       Symbol.newVal(owner, "thunks", TypeRepr.of[Array[() => Any]], Flags.EmptyFlags, Symbol.noSymbol))
@@ -286,15 +329,21 @@ object Macros {
     val classDef =
       if strictVals.isEmpty then movedClass
       else {
+        // The body becomes a placeholder that registers its thunk: the value for a strict val, the
+        // layer for a module. A strict val does so when `partial` is created, a lazy val or def
+        // when the Cell first reads it (see `register`).
+        def placeholder(sym: Symbol, tpe: TypeRepr, rhs: Term): Term = {
+          val i = strictIndex(sym)
+          val thunked = moduleOf(movedClass.body.find(_.symbol == sym).get).fold(rhs)(_.layer)
+          tpe.widen.asType match {
+            case '[t] => '{ $thunks(${ Expr(i) }) = () => ${ thunked.asExprOf[Any] }; null.asInstanceOf[t] }.asTerm.changeOwner(sym)
+          }
+        }
         val newBody = movedClass.body.map {
           case v: ValDef if strictIndex.contains(v.symbol) && v.rhs.nonEmpty =>
-            val i = strictIndex(v.symbol)
-            v.tpt.tpe.widen.asType match {
-              case '[t] =>
-                // The value is a placeholder: the Cell computes the real one through the thunk.
-                val rhs = '{ $thunks(${ Expr(i) }) = () => ${ v.rhs.get.asExprOf[t] }; null.asInstanceOf[t] }
-                ValDef.copy(v)(v.name, v.tpt, Some(rhs.asTerm.changeOwner(v.symbol)))
-            }
+            ValDef.copy(v)(v.name, v.tpt, Some(placeholder(v.symbol, v.tpt.tpe, v.rhs.get)))
+          case d: DefDef if strictIndex.contains(d.symbol) && d.rhs.nonEmpty =>
+            DefDef.copy(d)(d.name, d.paramss, d.returnTpt, Some(placeholder(d.symbol, d.returnTpt.tpe, d.rhs.get)))
           case s => s
         }
         ClassDef.copy(movedClass)(movedClass.name, movedClass.constructor, movedClass.parents, movedClass.self, newBody)
@@ -333,6 +382,23 @@ object Macros {
       },
       selfType = None)
 
+    // A module: its layer run focused through the field, root => root.db (see Overridable.focus and
+    // Override.focus). `register` makes a lazy val or def run its placeholder body, which stores the
+    // layer's thunk; a strict val stored it when `partial` was created.
+    def focused(f: Field): Term = {
+      val impl = f.impl.get
+      val register: Term = if isStrictVal(impl) then Literal(UnitConstant()) else Select(partial, impl)
+      val layer = '{ $thunks(${ Expr(strictIndex(impl)) })() }
+      resultType(f.memberType).asType match {
+        case '[t] =>
+          val get = '{ (root: A) => ${ Select('root.asTerm, f.m).asExprOf[t] } }
+          val focus =
+            if isBase then '{ Overridable.focus[A, t](${ u }, $get, ${ layer }.asInstanceOf[Overridable[t]]) }
+            else '{ Override.focus[A, t](${ u }, $get, ${ layer }.asInstanceOf[Override[t]]) }
+          Block(List(register), focus.asTerm)
+      }
+    }
+
     val memberDefs = fields.flatMap { f =>
       val name = f.m.name
       val get = cls.declaredMethod(name).head
@@ -340,10 +406,12 @@ object Macros {
       if !f.isCached then List(DefDef(get, argss => Some(applyArgs(Select(partial, impl), argss).changeOwner(get))))
       else {
         // The strict val's initializer lives in its thunk; anything else is read from the literal.
-        val compute: Term = strictIndex.get(impl) match {
-          case Some(i) => '{ $thunks(${ Expr(i) })() }.asTerm
-          case None => Select(partial, impl)
-        }
+        val compute: Term =
+          if f.isModule then focused(f)
+          else strictIndex.get(impl) match {
+            case Some(i) => '{ $thunks(${ Expr(i) })() }.asTerm
+            case None => Select(partial, impl)
+          }
         val cell = cls.declaredField(cellNames(name))
         resultType(f.memberType).asType match {
           case '[t] => List(

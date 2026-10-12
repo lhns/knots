@@ -2,7 +2,7 @@ package spike.c
 
 import cats.Monoid
 
-import scala.annotation.implicitNotFound
+import scala.annotation.{implicitNotFound, targetName}
 import scala.collection.mutable
 
 @implicitNotFound("self is only available inside an Overridable[...](new ...) or Override[...](new ...) literal")
@@ -33,7 +33,26 @@ opaque type Overridable[A] <: Override[A] = Self[A] => A
 // the literal's members through a Cell (computed once, cycles detected, see Cell and Macros.derive).
 // The literal's own lazy vals are therefore only ever entered by one thread at a time.
 // This needs JDK 25+ (ScopedValue), like spike D.
+// Marks a member as a module: `override lazy val db = module(DbModule.base(self.config.dbUrl))` in a
+// literal. It has the member's type so that the literal type-checks; the macro replaces the member
+// with the layer run focused through the field (see Overridable.focus), so these bodies only run if
+// the macro didn't see the call. A base needs a complete module (Overridable); an override may give
+// either: an Override is a deep override, an Overridable replaces the module. Both overloads erase to
+// the same signature, hence the @targetName.
+private val moduleMisuse = "module(...) must be the whole body of an overriding member in an Overridable/Override literal"
+
+@targetName("baseModule")
+def module[B](layer: Overridable[B])(using Self[?]): B = throw new IllegalStateException(moduleMisuse)
+
+def module[B](layer: Override[B])(using Self[?]): B = throw new IllegalStateException(moduleMisuse)
+
 object Overridable {
+  // The module `get(self)` of the enclosing layer, defined by `layer`: its `self` is the root's final
+  // `get(self)`, so late binding works through the whole tree. A base has no layer below, so its
+  // module must be complete (see Override.focus for overrides).
+  def focus[A, B](ctx: Self[A], get: A => B, layer: Overridable[B]): B =
+    layer(new Self[B] { def self: B = get(ctx.self) })
+
   // `o` is `new A { ... }` overriding every member of A (checked at compile time). A's
   // constructor needs a Upper, so the base gets one whose `upper` it can't use.
   inline def apply[A](inline o: Upper[A] ?=> A): Overridable[A] =
@@ -65,6 +84,14 @@ object Overridable {
 }
 
 object Override {
+  // A module in an override (see Overridable.focus): its `upper` is the module of the layer below, so
+  // an Override is a deep override and an Overridable replaces the module.
+  def focus[A, B](ctx: Upper[A], get: A => B, layer: Override[B]): B =
+    layer(new Upper[B] {
+      def self: B = get(ctx.self)
+      def upper: B = get(ctx.upper)
+    })
+
   // `o` is `new A { override ... }`; members it doesn't override fall back to A's `inherited` defaults.
   inline def apply[A](inline o: Upper[A] ?=> A): Override[A] =
     s => Macros.derive[A](o, s, false)
