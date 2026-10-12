@@ -4,5 +4,6 @@ ThisBuild / scalaVersion := "3.9.0"
 
 lazy val root = (project in file("."))
   .settings(
-    name := "knots"
+    name := "knots",
+    libraryDependencies += "org.typelevel" %% "cats-core" % "2.13.0"
   )

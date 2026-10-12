@@ -40,6 +40,9 @@ object SubsetOf {
   }
 }
 
+inline def fieldNames[T <: AnyNamedTuple]: List[String] =
+  constValueTuple[Names[T]].toList.asInstanceOf[List[String]]
+
 // F's shape with every field optional.
 type Partial[F <: AnyNamedTuple] = NamedTuple.Map[F, Option]
 
@@ -51,8 +54,7 @@ object Partial {
 final class PartialBuilder[F <: AnyNamedTuple] {
   // Fields of `o` become Some, the rest of F's fields None.
   inline def apply[O <: AnyNamedTuple](o: O)(using O SubsetOf F): Partial[F] = {
-    val present = constValueTuple[Names[O]].toList.asInstanceOf[List[String]].zip(o.asInstanceOf[Product].productIterator).toMap
-    val all = constValueTuple[Names[F]].toList.asInstanceOf[List[String]]
-    Tuple.fromArray(all.map(present.get).toArray[Any]).asInstanceOf[Partial[F]]
+    val present = fieldNames[O].zip(o.asInstanceOf[Product].productIterator).toMap
+    Tuple.fromArray(fieldNames[F].map(present.get).toArray[Any]).asInstanceOf[Partial[F]]
   }
 }

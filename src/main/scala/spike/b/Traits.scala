@@ -1,5 +1,7 @@
 package spike.b
 
+import cats.Monoid
+
 trait Self[A] {
   def self: A
 }
@@ -24,17 +26,12 @@ object Overridable {
   // Needs at least one override so a single argument always means "create" above;
   // overload resolution can't tell a context-function literal from a value otherwise.
   def apply[A](base: Overridable[A], ovr: Override[A], more: Override[A]*): Overridable[A] =
-    (ovr +: more).foldLeft(base)(layer)
-
-  private def layer[A](lower: Overridable[A], ovr: Override[A]): Overridable[A] =
-    s => ovr(new Super[A] {
-      lazy val upper: A = lower(s)
-      def self: A = s.self
-    })
+    stack(base, Override.monoid[A].combineAll(ovr +: more))
 
   def build[A](base: Overridable[A], overrides: Override[A]*): A = {
+    val knot = Overridable(base, Override.monoid[A].combineAll(overrides))
     var r: A | Null = null
-    r = overrides.foldLeft(base)(layer)(new Self[A] {
+    r = knot(new Self[A] {
       def self: A = r match {
         case null => throw new IllegalStateException("cannot evaluate untied knot")
         case a: A @unchecked => a
@@ -47,12 +44,19 @@ object Overridable {
 object Override {
   def apply[A](f: Super[A] ?=> A): Override[A] = s => f(using s)
 
-  // Stacked in order: each override's `upper` is the result of the ones before it.
-  def apply[A](first: Override[A], second: Override[A], more: Override[A]*): Override[A] =
-    (first +: second +: more).foldLeft[Override[A]](_.upper)((lower, ovr) =>
-      s => ovr(new Super[A] {
-        lazy val upper: A = lower(s)
-        def self: A = s.self
-      })
-    )
+  // `x |+| y` stacks y on top of x: y's `upper` is x's result. `empty` passes `upper` through.
+  // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit
+  // search would find cats' instance for plain functions instead.
+  given monoid[A]: Monoid[Override[A]] with {
+    def empty: Override[A] = _.upper
+    def combine(x: Override[A], y: Override[A]): Override[A] =
+      stack(x, y)
+  }
 }
+
+// Puts `ovr` on top of `lower`, which is a base (S = Self) or another override (S = Super).
+private def stack[A, S <: Self[A]](lower: S => A, ovr: Override[A]): S => A =
+  s => ovr(new Super[A] {
+    lazy val upper: A = lower(s)
+    def self: A = s.self
+  })

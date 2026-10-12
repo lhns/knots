@@ -1,5 +1,7 @@
 package spike.b
 
+import cats.syntax.all.*
+
 object Demo {
   case class Dependency(name: String)
 
@@ -50,6 +52,6 @@ object Demo {
     show("base", Overridable.build(base))
     show("flat", Overridable.build(base, o1, o2))
     show("layered", Overridable.build(Overridable(base, o1), o2))
-    show("composed", Overridable.build(base, Override(o1, o2)))
+    show("composed", Overridable.build(base, o1 |+| o2))
   }
 }

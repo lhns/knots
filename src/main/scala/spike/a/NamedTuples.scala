@@ -1,8 +1,9 @@
 package spike.a
 
-import scala.NamedTuple.{AnyNamedTuple, Names}
+import cats.Monoid
+
+import scala.NamedTuple.AnyNamedTuple
 import scala.collection.mutable
-import scala.compiletime.constValueTuple
 
 trait Self[F <: AnyNamedTuple] {
   def self: View[F]
@@ -34,38 +35,39 @@ final class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
 object Override {
   // `Override[F]` fixes F; the builder's `apply` then infers the literal's type O.
   def apply[F <: AnyNamedTuple]: OverrideBuilder[F] = OverrideBuilder()
+
+  // `x |+| y` stacks y on top of x: y's `upper` is x's result.
+  given [F <: AnyNamedTuple]: Monoid[Override[F]] with {
+    def empty: Override[F] = new Override(Vector.empty)
+    def combine(x: Override[F], y: Override[F]): Override[F] = new Override(x.layers ++ y.layers)
+  }
 }
 
 final class OverrideBuilder[F <: AnyNamedTuple] {
   inline def apply[O <: AnyNamedTuple](o: Super[F] ?=> O)(using O SubsetOf F): Override[F] = {
-    val names = constValueTuple[Names[O]].toList.asInstanceOf[List[String]]
-    new Override(Vector(Layer[F](names, s => Partial[F](o(using s)))))
+    new Override(Vector(Layer[F](fieldNames[O], s => Partial[F](o(using s)))))
   }
-
-  // Stacked in order: each override's `upper` is the result of the ones before it.
-  def apply(first: Override[F], second: Override[F], more: Override[F]*): Override[F] =
-    new Override((first +: second +: more).toVector.flatMap(_.layers))
 }
 
 final class Overridable[F <: AnyNamedTuple](
   val names: List[String],
   val base: Map[String, Self[F] => Any],
-  val layers: Vector[Layer[F]]
+  val overrides: Override[F]
 )
 
 object Overridable {
   inline def apply[F <: AnyNamedTuple](defs: Defs[F]): Overridable[F] = {
-    val names = constValueTuple[Names[F]].toList.asInstanceOf[List[String]]
     val fns = defs.toTuple.toList.map(f => (s: Self[F]) => f.asInstanceOf[Self[F] ?=> Any](using s))
-    new Overridable(names, names.zip(fns).toMap, Vector.empty)
+    new Overridable(fieldNames[F], fieldNames[F].zip(fns).toMap, Monoid.empty)
   }
 
   def apply[F <: AnyNamedTuple](base: Overridable[F], ovr: Override[F], more: Override[F]*): Overridable[F] =
-    new Overridable(base.names, base.base, base.layers ++ (ovr +: more).flatMap(_.layers))
+    new Overridable(base.names, base.base, Monoid.combineAll(base.overrides +: ovr +: more))
 
   // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1.
   def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): F = {
-    val layers = base.layers ++ overrides.flatMap(_.layers)
+    val knot = Overridable(base, Monoid.combineAll(overrides))
+    val layers = knot.overrides.layers
     val top = layers.length
     val fieldCache = mutable.Map.empty[String, Any]
     val layerCache = mutable.Map.empty[Int, Map[String, Any]]
@@ -96,7 +98,7 @@ object Overridable {
     def resolve(level: Int, name: String): Any = definingLevel(level, name) match {
       case 0 =>
         fieldCache.getOrElse(name, guarded(0, name) {
-          val value = base.base(name)(new Self[F] { def self = views(top) })
+          val value = knot.base(name)(new Self[F] { def self = views(top) })
           fieldCache(name) = value
           value
         })
@@ -107,12 +109,12 @@ object Overridable {
             def self = views(top)
             def upper = views(l - 1)
           })
-          val values = base.names.zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
+          val values = knot.names.zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
           layerCache(l) = values
           values
         })(name)
     }
 
-    Tuple.fromArray(base.names.map(views(top).selectDynamic).toArray[Any]).asInstanceOf[F]
+    Tuple.fromArray(knot.names.map(views(top).selectDynamic).toArray[Any]).asInstanceOf[F]
   }
 }
