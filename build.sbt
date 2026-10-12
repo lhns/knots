@@ -6,7 +6,8 @@ lazy val root = (project in file("."))
   .settings(
     name := "knots",
     libraryDependencies += "org.typelevel" %% "cats-core" % "2.13.0",
-    scalacOptions += "-Xcheck-macros",
+    // -Yretain-trees: spike C checks the bodies of target trait members (must be `= inherited`).
+    scalacOptions ++= Seq("-Xcheck-macros", "-Yretain-trees"),
     // Cell uses java.lang.ScopedValue (final since JDK 25).
     initialize := {
       initialize.value
