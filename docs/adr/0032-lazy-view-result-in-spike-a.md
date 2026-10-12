@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12, commit 70fe09f)
+Accepted (2026-10-12, commit 70fe09f); whole-layer evaluation superseded by 0035
 
 ## Context
 

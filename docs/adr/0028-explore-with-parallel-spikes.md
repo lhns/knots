@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-12, branch spike/api-redesign)
+Accepted (2026-10-12, branch spike/api-redesign); the description of A as macro-free is superseded by 0035
 
 ## Context
 

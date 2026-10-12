@@ -33,13 +33,13 @@ that uses `self.dep2` must see the overridden `dep2`.
 | Target | named tuple | trait | trait with `using Upper` | trait or named tuple (`View`) | trait or named tuple (`View`) |
 | Override input | partial named-tuple literal | object literal, class instance, complete instance | `new T { override ... }` | named-tuple literal, object literal, class instance, named-tuple value, complete instance | same as D |
 | Who implements unsupplied members | runtime lookup by field name | macro-generated delegate class | trait defaults (`= inherited`) | macro-generated delegate class | macro-generated delegate class |
-| Laziness | per base field, each override layer as a whole (`Cell`) | per field (`Cell`) | per overridden member (`Cell`) | per field (`Cell`) | per field (`Cell`) |
+| Laziness | per field (`Cell`) | per field (`Cell`) | per overridden member (`Cell`) | per field (`Cell`) | per field (`Cell`) |
 | Cycle detection | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | `ScopedValue` + wait-for graph | explicit path + wait-for graph, with gaps |
 | Modules (nested sets) | yes, focused at runtime | yes | yes, `module(...)` rewritten by the macro | yes | yes |
-| Macros | none, only type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
+| Macros | one small macro (splits override literals), otherwise type-level code | generates a class | checks, and a wrapper class for the cells | generates a class | generates a class |
 | JDK | 25+ | 25+ | 25+ | 25+ | 21+ |
 
-### A: named tuples, no macros (`a/`)
+### A: named tuples, almost no macros (`a/`)
 
 `type Deps = (dep1: Dependency, ...)`. The base is a full named-tuple literal whose fields become
 deferred context functions. An override is a partial literal, `Override[Deps]((dep2 = ...))`,
@@ -50,10 +50,12 @@ D's `Cell` (ADR 0032). `Overridable <: Override` as in the other spikes (a base 
 everything below it); the override check (`Checks.scala`) rejects raw layers for module fields and
 reserved field names (`selectDynamic`, `toTuple`, ...), while `Partial`/`SubsetOf` stay reusable on their own.
 
-- Pros: no generated code at all; the checks are ordinary type-level Scala.
+- Pros: no generated classes; the checks are ordinary type-level Scala; the only macro is a small one that
+  splits an override literal into one deferred function per field (ADR 0035).
 - Cons:
-  - An override layer is evaluated as a whole, so fields of one override can't use each other via
-    `self` (a cycle error says so).
+  - A base literal with more than 22 fields doesn't type, and a base field whose type is itself a named
+    tuple doesn't type (the match type allowing modules can't reduce there).
+  - An override given as a value (a variable, `++`) instead of a literal is evaluated as a whole.
   - `self.x` and the built object rely on IDE support for `Selectable`.
   - `Override[Deps]` always needs the type argument.
 - Modules: a field of type `View[DbDeps]` takes `module(DbModule.base(...))`. A has no macro, but
