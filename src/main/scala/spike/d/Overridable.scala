@@ -29,7 +29,7 @@ opaque type Override[A] = Upper[A] => A
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
-  // `o` defines every member of A (`new { lazy val dep1 = ... }`, `(dep1 = ..., ...)`, see Macros).
+  // `o` defines every member of A (`(dep1 = ..., ...)`, `new { def dep1 = ... }`, see Macros).
   inline def apply[A](inline o: Self[A] ?=> Any): Overridable[A] =
     s => Macros.derive[A, Self[A]](o, s, isBase = true)
 
@@ -77,20 +77,20 @@ private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
 
 // The members the current computation is in the middle of, outermost first. A ScopedValue is bound
 // for the extent of a call and seen by everything it calls, without depending on thread identity.
-private val computing: ScopedValue[List[Cell[?]]] = ScopedValue.newInstance()
+private val computing: ScopedValue[List[Cell]] = ScopedValue.newInstance()
 
 // Caches one generated member and detects dependency cycles: asking for a member that the current
 // computation is already in the middle of fails with the path, where a lazy val would wait on itself
 // forever. Other callers wait for the value.
-final class Cell[T](val name: String) {
+final class Cell(val name: String) {
   private enum State {
     case Empty
     case Pending(done: CountDownLatch)
-    case Done(value: T)
+    case Done(value: Any)
   }
   private val state = new AtomicReference[State](State.Empty)
 
-  def get(compute: => T): T = {
+  def get(compute: => Any): Any = {
     val path = if computing.isBound then computing.get else Nil
     if path.contains(this) then throw new CycleException(path.dropWhile(_ ne this).map(_.name) :+ name)
     state.get match {

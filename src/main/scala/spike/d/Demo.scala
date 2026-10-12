@@ -29,7 +29,7 @@ object Demo {
   }))
 
   val o2 = Override[MainDependencies](new {
-    lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
+    def dep2 = Dependency(s"wrapped(${upper.dep2.name})")
   })
 
   // Target as a named tuple: `self`/`upper` are Views (Selectable), `toTuple` gives the plain tuple.
@@ -47,7 +47,7 @@ object Demo {
   val t1 = Override[MainDeps]((dep2 = Dependency(s"overridden2 using ${self.dep1.name}")))
 
   val t2 = Override[MainDeps](new {
-    lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
+    def dep2 = Dependency(s"wrapped(${upper.dep2.name})")
   })
 
   def show(label: String, deps: MainDependencies): Unit = {

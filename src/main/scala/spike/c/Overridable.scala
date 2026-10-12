@@ -10,7 +10,7 @@ trait Upper[A] extends Self[A] {
   def upper: A
 }
 
-// Plain defs, not inline: the literal check recognizes calls to them in the tree.
+// Plain defs, not inline: the literal check recognizes calls to `upper` in the tree.
 def self[A](using s: Self[A]): A = s.self
 
 def upper[A](using s: Upper[A]): A = s.upper
@@ -23,6 +23,8 @@ opaque type Override[A] = Upper[A] => A
 // e.g. as a child of another base, replacing it completely.
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
+// Members are the user's own lazy vals, with nothing generated around them, so there is no cycle
+// detection here: a dependency cycle waits on itself forever, like any recursive lazy val.
 object Overridable {
   // `o` is `new A { ... }` overriding every member of A (checked at compile time). A's
   // constructor needs a Upper, so the base gets one whose `upper` it can't use.

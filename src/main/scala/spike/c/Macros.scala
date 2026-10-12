@@ -17,6 +17,8 @@ object Macros {
       else enclosingMember(sym.owner)
 
     val member = enclosingMember(Symbol.spliceOwner)
+    if member.owner.methodMember(member.name).size > 1 then
+      report.errorAndAbort(s"inherited doesn't support the overloaded member ${member.name}")
     val upper = TypeRepr.of[Upper].appliedTo(member.owner.typeRef).asType match {
       case '[s] => Expr.summon[s] match {
         case Some(s) => Select.unique(s.asTerm, "upper")
@@ -41,25 +43,23 @@ object Macros {
     val target = TypeRepr.of[A]
     val targetSym = target.typeSymbol
     val isBase = base.valueOrAbort
-
-    val firstClass = new TreeAccumulator[Option[ClassDef]] {
-      def foldTree(found: Option[ClassDef], tree: Tree)(owner: Symbol): Option[ClassDef] =
-        found.orElse(tree match {
-          case cd: ClassDef => Some(cd)
-          case _ => foldOverTree(None, tree)(owner)
-        })
-    }
-    val literal = firstClass.foldTree(None, o.asTerm)(Symbol.spliceOwner) match {
+    val literal = objectLiteral(o.asTerm) match {
       case Some(cd) if cd.symbol.typeRef <:< target => cd
       case _ => report.errorAndAbort(s"expected an object literal: new ${target.show} { ... }", o)
     }
     val anon = literal.symbol
 
-    val members = (targetSym.declaredMethods ++ targetSym.declaredFields).filter { m =>
+    // A's members, inherited ones included (but not Any's/Object's).
+    val members = (targetSym.methodMembers ++ targetSym.fieldMembers).filter { m =>
       !m.isClassConstructor && !(m.flags.is(Flags.Private) || m.flags.is(Flags.Protected) ||
-        m.flags.is(Flags.Synthetic) || m.flags.is(Flags.ParamAccessor))
+        m.flags.is(Flags.Synthetic) || m.flags.is(Flags.ParamAccessor)) &&
+        m.owner != defn.AnyClass && m.owner != defn.ObjectClass && m.owner != defn.MatchableClass
+    }
+    members.groupBy(_.name).collectFirst { case (n, ms) if ms.size > 1 =>
+      report.errorAndAbort(s"overloaded member $n in ${target.show} is not supported")
     }
     val memberNames = members.map(_.name).toSet
+    val upperSym = Symbol.requiredModule("spike.c.Overridable$package").methodMember("upper").head
 
     if isBase then {
       val overridden = (anon.declaredMethods ++ anon.declaredFields).map(_.name).toSet
@@ -68,7 +68,7 @@ object Macros {
         report.error(s"the base must override every member of ${target.show}; missing: ${missing.sorted.mkString(", ")}", literal.pos)
     }
 
-    def isOwnMember(sym: Symbol) = memberNames(sym.name) && (sym.owner == anon || sym.owner == targetSym)
+    def isOwnMember(sym: Symbol) = memberNames(sym.name) && (sym.owner == anon || target.baseClasses.contains(sym.owner))
 
     new TreeTraverser {
       override def traverseTree(tree: Tree)(owner: Symbol): Unit = {
@@ -77,7 +77,7 @@ object Macros {
             report.error(s"use self.$name: a bare $name skips overrides in subclass layers", tree.pos)
           case Ident(name) if tree.symbol.isTerm && isOwnMember(tree.symbol) =>
             report.error(s"use self.$name: a bare $name skips overrides in subclass layers", tree.pos)
-          case Ident("upper") if isBase && tree.symbol.owner.fullName.startsWith("spike.c") =>
+          case _: Ident if isBase && tree.symbol == upperSym =>
             report.error("the base has no upper", tree.pos)
           case _ =>
         }
@@ -86,5 +86,22 @@ object Macros {
     }.traverseTree(literal)(anon)
 
     '{ () }
+  }
+
+  // The object literal `new A { ... }` that is the body of the context-function argument.
+  private def objectLiteral(using q: Quotes)(o: q.reflect.Term): Option[q.reflect.ClassDef] = {
+    import q.reflect.*
+    def strip(t: Term): Term = t match {
+      case Inlined(_, Nil, e) => strip(e)
+      case Typed(e, _) => strip(e)
+      case t => t
+    }
+    strip(o) match {
+      case Block(List(DefDef(_, _, _, Some(body))), _: Closure) => strip(body) match {
+        case Block(List(cd: ClassDef), _) => Some(cd)
+        case _ => None
+      }
+      case _ => None
+    }
   }
 }

@@ -13,9 +13,9 @@ object Demo {
 
   object MainDependencies {
     val base = Overridable[MainDependencies](new {
-      lazy val dep1 = Dependency("base1")
-      lazy val dep2 = Dependency("base2")
-      lazy val dep3 = {
+      def dep1 = Dependency("base1")
+      def dep2 = Dependency("base2")
+      def dep3 = {
         println(s"dep3 initialized using ${self.dep2}")
         Dependency("base3")
       }
@@ -25,7 +25,7 @@ object Demo {
   import MainDependencies.base
 
   val o1 = Override[MainDependencies](new {
-    lazy val dep2 = {
+    def dep2 = {
       println(s"dep2 initialized using ${self.dep1}")
       Dependency("overridden2")
     }
@@ -33,7 +33,7 @@ object Demo {
 
   // A named class works too: it supplies the members it declares.
   class Wrapped(using Upper[MainDependencies]) {
-    lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
+    def dep2 = Dependency(s"wrapped(${upper.dep2.name})")
   }
 
   val o2 = Override[MainDependencies](new Wrapped)

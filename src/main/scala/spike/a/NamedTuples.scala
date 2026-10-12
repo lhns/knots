@@ -61,12 +61,15 @@ object Overridable {
     new Overridable(fieldNames[F], fieldNames[F].zip(fns).toMap, Monoid.empty)
   }
 
-  def apply[F <: AnyNamedTuple](base: Overridable[F], ovr: Override[F], more: Override[F]*): Overridable[F] =
-    new Overridable(base.names, base.base, Monoid.combineAll(base.overrides +: ovr +: more))
+  // Layering on a base keeps it a base: `base |+| o1 |+| o2`.
+  extension [F <: AnyNamedTuple](base: Overridable[F]) def |+|(ovr: Override[F]): Overridable[F] =
+    new Overridable(base.names, base.base, Monoid.combine(base.overrides, ovr))
 
   // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1.
+  // The caches are plain maps: build is synchronous and computes every field, so a `self` kept by a
+  // field only reads them later, except for a layer none of whose fields made it to the top.
   def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): F = {
-    val knot = Overridable(base, Monoid.combineAll(overrides))
+    val knot = base |+| Monoid.combineAll(overrides)
     val layers = knot.overrides.layers
     val top = layers.length
     val fieldCache = mutable.Map.empty[String, Any]
