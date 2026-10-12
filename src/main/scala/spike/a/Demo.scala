@@ -23,10 +23,12 @@ object Demo {
 
   val o2 = Override[MainDeps]((dep2 = Dependency(s"wrapped(${upper.dep2.name})")))
 
-  def show(label: String, deps: MainDeps): Unit = {
-    println(s"$label.dep1 ${deps.dep1}")
-    println(s"$label.dep2 ${deps.dep2}")
-    println(s"$label.dep3 ${deps.dep3}")
+  // Nothing is computed until accessed; toTuple first keeps the initialisation messages above the lines.
+  def show(label: String, deps: View[MainDeps]): Unit = {
+    val all = deps.toTuple
+    println(s"$label.dep1 ${all.dep1}")
+    println(s"$label.dep2 ${all.dep2}")
+    println(s"$label.dep3 ${all.dep3}")
   }
 
   def main(args: Array[String]): Unit = {

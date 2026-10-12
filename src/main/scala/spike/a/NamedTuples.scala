@@ -2,13 +2,16 @@ package spike.a
 
 import cats.Monoid
 
-import scala.NamedTuple.AnyNamedTuple
-import scala.collection.mutable
+import scala.NamedTuple.{AnyNamedTuple, Names}
+import scala.annotation.implicitNotFound
+import scala.compiletime.constValueTuple
 
+@implicitNotFound("self is only available inside an Overridable[...](...) or Override[...](...) literal")
 trait Self[F <: AnyNamedTuple] {
   def self: View[F]
 }
 
+@implicitNotFound("upper is only available in an Override; a base (Overridable) has no layer below")
 trait Upper[F <: AnyNamedTuple] extends Self[F] {
   def upper: View[F]
 }
@@ -20,12 +23,17 @@ inline def upper[F <: AnyNamedTuple](using s: Upper[F]): View[F] = s.upper
 // Every field of F, deferred until `self` exists.
 type Defs[F <: AnyNamedTuple] = NamedTuple.Map[F, [X] =>> Self[F] ?=> X]
 
-// Lazy, cached access to the fields of F while the knot is being tied.
+// The fields of F, each computed on first access (`view.dep2`), also while the knot is being tied.
 final class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable {
   type Fields = F
 
   def selectDynamic(name: String): Any = resolve(name)
 }
+
+extension [F <: AnyNamedTuple](view: View[F])
+  // Computes every field.
+  inline def toTuple: F =
+    Tuple.fromArray(fieldNames[F].map(view.selectDynamic).toArray[Any]).asInstanceOf[F]
 
 // A layer is evaluated as a unit: its fields can't reference each other via `self`.
 final case class Layer[F <: AnyNamedTuple](names: List[String], values: Upper[F] => Partial[F])
@@ -65,59 +73,37 @@ object Overridable {
   extension [F <: AnyNamedTuple](base: Overridable[F]) def |+|(ovr: Override[F]): Overridable[F] =
     new Overridable(base.names, base.base, Monoid.combine(base.overrides, ovr))
 
-  // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1.
-  // The caches are plain maps: build is synchronous and computes every field, so a `self` kept by a
-  // field only reads them later, except for a layer none of whose fields made it to the top.
-  def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): F = {
+  // Level 0 is the base, level i > 0 is layers(i - 1); `upper` of level i is level i - 1. Nothing is
+  // computed here: each base field and each layer is a Cell, computed on first access. A layer is
+  // computed as a whole, so its fields can't use each other via `self`.
+  def build[F <: AnyNamedTuple](base: Overridable[F], overrides: Override[F]*): View[F] = {
     val knot = base |+| Monoid.combineAll(overrides)
     val layers = knot.overrides.layers
     val top = layers.length
-    val fieldCache = mutable.Map.empty[String, Any]
-    val layerCache = mutable.Map.empty[Int, Map[String, Any]]
-    val inProgress = mutable.LinkedHashMap.empty[(Int, String), Unit]
     lazy val views: Vector[View[F]] = Vector.tabulate(top + 1)(level => View[F](resolve(level, _)))
-
-    def label(level: Int, name: String) = if level == 0 then s"$name (base)" else s"$name (layer $level)"
 
     def definingLevel(level: Int, name: String): Int =
       if level == 0 || layers(level - 1).names.contains(name) then level else definingLevel(level - 1, name)
 
-    // Base fields are guarded per field, layers as a whole.
-    def guarded[T](level: Int, name: String)(compute: => T): T = {
-      val clash = inProgress.keys.find((l, n) => l == level && (level != 0 || n == name))
-      clash.foreach { start =>
-        val cycle = inProgress.keys.toList.dropWhile(_ != start)
-        val path = cycle.map(label) :+ label(level, name)
-        val hint =
-          if level != 0 && cycle.forall(_._1 == level) then " (a layer is evaluated as a unit; its fields can't use each other via self)"
-          else ""
-        throw IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}$hint")
-      }
-      inProgress((level, name)) = ()
-      try compute
-      finally inProgress.remove((level, name))
-    }
-
     def resolve(level: Int, name: String): Any = definingLevel(level, name) match {
-      case 0 =>
-        fieldCache.getOrElse(name, guarded(0, name) {
-          val value = knot.base(name)(new Self[F] { def self = views(top) })
-          fieldCache(name) = value
-          value
-        })
-      case l =>
-        layerCache.getOrElse(l, guarded(l, name) {
-          val layer = layers(l - 1)
-          val partial = layer.values(new Upper[F] {
-            def self = views(top)
-            def upper = views(l - 1)
-          })
-          val values = knot.names.zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
-          layerCache(l) = values
-          values
-        })(name)
+      case 0 => baseCells(name).get
+      case l => layerCells(l - 1).get.asInstanceOf[Map[String, Any]](name)
     }
 
-    Tuple.fromArray(knot.names.map(views(top).selectDynamic).toArray[Any]).asInstanceOf[F]
+    lazy val baseCells = knot.names.map { name =>
+      name -> Cell(s"$name (base)", () => knot.base(name)(new Self[F] { def self = views(top) }))
+    }.toMap
+    lazy val layerCells = layers.zipWithIndex.map { (layer, i) =>
+      val l = i + 1
+      Cell(s"${layer.names.mkString(", ")} (layer $l)", () => {
+        val partial = layer.values(new Upper[F] {
+          def self = views(top)
+          def upper = views(l - 1)
+        })
+        knot.names.zip(partial.asInstanceOf[Product].productIterator).collect { case (n, Some(v)) => n -> v }.toMap
+      }, " (a layer is evaluated as a unit; its fields can't use each other via self)")
+    }
+
+    views(top)
   }
 }
