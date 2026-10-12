@@ -19,7 +19,7 @@ inline def upper[A](using s: Super[A]): A = s.upper
 opaque type Override[A] = Super[A] => A
 
 // A base is an override that doesn't need `upper`, so it can stand wherever an Override can,
-// e.g. on top of another base to replace it completely.
+// e.g. below another base to replace it completely.
 opaque type Overridable[A] <: Override[A] = Self[A] => A
 
 object Overridable {
@@ -29,10 +29,10 @@ object Overridable {
 
   // Layering on a base keeps it a base (it still needs no upper); Override's monoid alone
   // would widen the result to Override.
-  extension [A](base: Overridable[A]) def |+|(ovr: Override[A]): Overridable[A] = stack(base, ovr)
+  extension [A](base: Overridable[A]) def |+|(ovr: Override[A]): Overridable[A] = layer(base, ovr)
 
   def build[A](base: Overridable[A], overrides: Override[A]*): A = {
-    val knot = stack(base, Override.monoid[A].combineAll(overrides))
+    val knot = layer(base, Override.monoid[A].combineAll(overrides))
     var r: A | Null = null
     r = knot(new Self[A] {
       def self: A = r match {
@@ -49,19 +49,22 @@ object Override {
   inline def apply[A](inline o: Super[A] ?=> Any): Override[A] =
     s => Derive.derive[A, Super[A]](o, s, isBase = false)
 
-  // `x |+| y` stacks y on top of x: y's `upper` is x's result. `empty` passes `upper` through.
+  // `x |+| y` layers y below x: y overrides x, so y's `upper` is x's result. `empty` passes `upper` through.
   // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit
   // search would find cats' instance for plain functions instead.
   given monoid[A]: Monoid[Override[A]] with {
     def empty: Override[A] = _.upper
     def combine(x: Override[A], y: Override[A]): Override[A] =
-      stack(x, y)
+      layer(x, y)
   }
 }
 
-// Puts `ovr` on top of `lower`, which is a base (S = Self) or another override (S = Super).
-private def stack[A, S <: Self[A]](lower: S => A, ovr: Override[A]): S => A =
-  s => ovr(new Super[A] {
-    lazy val upper: A = lower(s)
+// Layers `lowerLayer` below `upperLayer`: lowerLayer overrides upperLayer, so its `upper` is
+// upperLayer's result. Both get the same `s`: the final `self` (late binding) and, if this pair is
+// itself an override inside a bigger stack, the `upper` from outside. `upperLayer` is a base
+// (S = Self) or another override (S = Super).
+private def layer[A, S <: Self[A]](upperLayer: S => A, lowerLayer: Override[A]): S => A =
+  s => lowerLayer(new Super[A] {
+    lazy val upper: A = upperLayer(s)
     def self: A = s.self
   })

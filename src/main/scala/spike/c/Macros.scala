@@ -30,7 +30,7 @@ object Macros {
   }
 
   // `o` must be an object literal `new A { ... }`. It must not reference A's members bare
-  // (`dep2` instead of `self.dep2` would skip overrides layered on top). A base must also
+  // (`dep2` instead of `self.dep2` would skip overrides layered below). A base must also
   // override every member of A and can't use `upper`.
   inline def checkLiteral[A](inline o: Super[A] ?=> A, inline base: Boolean): Unit =
     ${ checkLiteralImpl[A]('o, 'base) }
@@ -74,9 +74,9 @@ object Macros {
       override def traverseTree(tree: Tree)(owner: Symbol): Unit = {
         tree match {
           case Select(qual @ This(_), name) if qual.symbol == anon && isOwnMember(tree.symbol) =>
-            report.error(s"use self.$name: a bare $name skips overrides layered on top", tree.pos)
+            report.error(s"use self.$name: a bare $name skips overrides layered below", tree.pos)
           case Ident(name) if tree.symbol.isTerm && isOwnMember(tree.symbol) =>
-            report.error(s"use self.$name: a bare $name skips overrides layered on top", tree.pos)
+            report.error(s"use self.$name: a bare $name skips overrides layered below", tree.pos)
           case Ident("upper") if isBase && tree.symbol.owner.fullName.startsWith("spike.c") =>
             report.error("the base has no upper", tree.pos)
           case _ =>
