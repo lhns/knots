@@ -12,7 +12,7 @@ object Demo {
   }
 
   object MainDependencies {
-    val base = Overridable[MainDependencies](new MainDependencies {
+    val base = Overridable[MainDependencies](new {
       lazy val dep1 = Dependency("base1")
       lazy val dep2 = Dependency("base2")
       lazy val dep3 = {
@@ -20,25 +20,19 @@ object Demo {
         Dependency("base3")
       }
     })
-
-    class Delegate(using Super[MainDependencies]) extends MainDependencies {
-      def dep1 = upper.dep1
-      def dep2 = upper.dep2
-      def dep3 = upper.dep3
-    }
   }
 
-  import MainDependencies.{Delegate, base}
+  import MainDependencies.base
 
-  val o1 = Override[MainDependencies](new Delegate {
-    override lazy val dep2 = {
+  val o1 = Override[MainDependencies](new {
+    lazy val dep2 = {
       println(s"dep2 initialized using ${self.dep1}")
       Dependency("overridden2")
     }
   })
 
-  val o2 = Override[MainDependencies](new Delegate {
-    override lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
+  val o2 = Override[MainDependencies](new {
+    lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
   })
 
   def show(label: String, deps: MainDependencies): Unit = {
