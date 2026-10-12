@@ -32,7 +32,7 @@ object Demo {
   })
 
   // A named class works too: it supplies the members it declares.
-  class Wrapped(using Super[MainDependencies]) {
+  class Wrapped(using Upper[MainDependencies]) {
     lazy val dep2 = Dependency(s"wrapped(${upper.dep2.name})")
   }
 

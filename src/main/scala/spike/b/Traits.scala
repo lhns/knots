@@ -6,17 +6,17 @@ trait Self[A] {
   def self: A
 }
 
-trait Super[A] extends Self[A] {
+trait Upper[A] extends Self[A] {
   def upper: A
 }
 
 inline def self[A](using s: Self[A]): A = s.self
 
-inline def upper[A](using s: Super[A]): A = s.upper
+inline def upper[A](using s: Upper[A]): A = s.upper
 
 // Opaque (over plain functions: context function types can't be opaque) so a value isn't
 // auto-applied like a bare context function: `val o = Override(...)` needs no type ascription.
-opaque type Override[A] = Super[A] => A
+opaque type Override[A] = Upper[A] => A
 
 // A base is an override that doesn't need `upper`, so it can stand wherever an Override can,
 // e.g. as a child of another base, replacing it completely.
@@ -46,8 +46,8 @@ object Overridable {
 
 object Override {
   // `o` defines only the overridden members; the rest come from `upper`, see Derive.
-  inline def apply[A](inline o: Super[A] ?=> Any): Override[A] =
-    s => Derive.derive[A, Super[A]](o, s, isBase = false)
+  inline def apply[A](inline o: Upper[A] ?=> Any): Override[A] =
+    s => Derive.derive[A, Upper[A]](o, s, isBase = false)
 
   // `x |+| y` is y extending x: y's `upper` (its super) is x's result. `empty` passes `upper` through.
   // Named so this file can pass it explicitly: here Override[A] is transparent, so implicit
@@ -62,9 +62,9 @@ object Override {
 // Like `class Child extends Parent`: `upper` is `super`, `self` is the final `this`. The child's
 // `upper` is the parent's result; both see the same `s`, i.e. the same final `self` and, if this
 // pair is itself an override in a bigger chain, the same outer `upper`. The parent is a base
-// (S = Self) or another override (S = Super).
+// (S = Self) or another override (S = Upper).
 private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
-  s => child(new Super[A] {
+  s => child(new Upper[A] {
     lazy val upper: A = parent(s)
     def self: A = s.self
   })

@@ -30,7 +30,7 @@ object Derive {
     }
     if body.tpe.widen <:< target then return '{ $o(using $s).asInstanceOf[A] }
 
-    // The argument, moved into the expansion with its Self/Super parameter replaced by `s`. An object
+    // The argument, moved into the expansion with its Self/Upper parameter replaced by `s`. An object
     // literal's type is widened to Object, so its class definition moves along to keep its type.
     val owner = Symbol.spliceOwner
     val moved = new TreeMap {
@@ -83,7 +83,7 @@ object Derive {
     }
 
     // A layer forwards everything it doesn't supply to `upper`; a base keeps A's concrete defaults.
-    val upper = Option.when(!isBase)('{ ${ s.asExprOf[spike.b.Super[A]] }.upper }.asTerm)
+    val upper = Option.when(!isBase)('{ ${ s.asExprOf[Upper[A]] }.upper }.asTerm)
     val implemented = traitMembers.filter(m => supplied.contains(m.name) || !isBase)
     val parents = List(TypeTree.of[Object], TypeTree.of[A])
     val cls = Symbol.newClass(owner, "Derived", parents.map(_.tpe),

@@ -9,13 +9,13 @@ trait Self[F <: AnyNamedTuple] {
   def self: View[F]
 }
 
-trait Super[F <: AnyNamedTuple] extends Self[F] {
+trait Upper[F <: AnyNamedTuple] extends Self[F] {
   def upper: View[F]
 }
 
 inline def self[F <: AnyNamedTuple](using s: Self[F]): View[F] = s.self
 
-inline def upper[F <: AnyNamedTuple](using s: Super[F]): View[F] = s.upper
+inline def upper[F <: AnyNamedTuple](using s: Upper[F]): View[F] = s.upper
 
 // Every field of F, deferred until `self` exists.
 type Defs[F <: AnyNamedTuple] = NamedTuple.Map[F, [X] =>> Self[F] ?=> X]
@@ -28,7 +28,7 @@ final class View[F <: AnyNamedTuple](resolve: String => Any) extends Selectable 
 }
 
 // A layer is evaluated as a unit: its fields can't reference each other via `self`.
-final case class Layer[F <: AnyNamedTuple](names: List[String], values: Super[F] => Partial[F])
+final case class Layer[F <: AnyNamedTuple](names: List[String], values: Upper[F] => Partial[F])
 
 final class Override[F <: AnyNamedTuple](val layers: Vector[Layer[F]])
 
@@ -44,7 +44,7 @@ object Override {
 }
 
 final class OverrideBuilder[F <: AnyNamedTuple] {
-  inline def apply[O <: AnyNamedTuple](o: Super[F] ?=> O)(using O SubsetOf F): Override[F] = {
+  inline def apply[O <: AnyNamedTuple](o: Upper[F] ?=> O)(using O SubsetOf F): Override[F] = {
     new Override(Vector(Layer[F](fieldNames[O], s => Partial[F](o(using s)))))
   }
 }
@@ -105,7 +105,7 @@ object Overridable {
       case l =>
         layerCache.getOrElse(l, guarded(l, name) {
           val layer = layers(l - 1)
-          val partial = layer.values(new Super[F] {
+          val partial = layer.values(new Upper[F] {
             def self = views(top)
             def upper = views(l - 1)
           })

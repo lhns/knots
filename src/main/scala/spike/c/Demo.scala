@@ -6,7 +6,7 @@ object Demo {
   case class Dependency(name: String)
 
   // The trait is its own Delegate: every member defaults to the layer below.
-  trait MainDependencies(using Super[MainDependencies]) {
+  trait MainDependencies(using Upper[MainDependencies]) {
     def dep1: Dependency = inherited
     def dep2: Dependency = inherited
     def dep3: Dependency = inherited

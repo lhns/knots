@@ -3,8 +3,8 @@ package spike.c
 import scala.quoted.*
 
 // Default body of a member of an overridable trait: forwards to the same member of `upper`.
-//   trait MainDependencies(using Super[MainDependencies]) { def dep1: Dependency = inherited }
-// Only the result type is a parameter: with a `using Super[A]` here, T would be inferred as Nothing.
+//   trait MainDependencies(using Upper[MainDependencies]) { def dep1: Dependency = inherited }
+// Only the result type is a parameter: with a `using Upper[A]` here, T would be inferred as Nothing.
 inline def inherited[T]: T = ${ Macros.inheritedImpl[T] }
 
 object Macros {
@@ -17,10 +17,10 @@ object Macros {
       else enclosingMember(sym.owner)
 
     val member = enclosingMember(Symbol.spliceOwner)
-    val upper = TypeRepr.of[spike.c.Super].appliedTo(member.owner.typeRef).asType match {
+    val upper = TypeRepr.of[Upper].appliedTo(member.owner.typeRef).asType match {
       case '[s] => Expr.summon[s] match {
         case Some(s) => Select.unique(s.asTerm, "upper")
-        case None => report.errorAndAbort(s"inherited needs a given Super[${member.owner.name}], e.g. a `using` trait parameter")
+        case None => report.errorAndAbort(s"inherited needs a given Upper[${member.owner.name}], e.g. a `using` trait parameter")
       }
     }
     val call = Select.unique(upper, member.name)
@@ -32,10 +32,10 @@ object Macros {
   // `o` must be an object literal `new A { ... }`. It must not reference A's members bare
   // (`dep2` instead of `self.dep2` would skip overrides in subclass layers). A base must also
   // override every member of A and can't use `upper`.
-  inline def checkLiteral[A](inline o: Super[A] ?=> A, inline base: Boolean): Unit =
+  inline def checkLiteral[A](inline o: Upper[A] ?=> A, inline base: Boolean): Unit =
     ${ checkLiteralImpl[A]('o, 'base) }
 
-  private def checkLiteralImpl[A: Type](o: Expr[Super[A] ?=> A], base: Expr[Boolean])(using Quotes): Expr[Unit] = {
+  private def checkLiteralImpl[A: Type](o: Expr[Upper[A] ?=> A], base: Expr[Boolean])(using Quotes): Expr[Unit] = {
     import quotes.reflect.*
 
     val target = TypeRepr.of[A]
