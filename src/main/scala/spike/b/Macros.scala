@@ -99,7 +99,10 @@ object Macros {
           case (fn, (targ: TypeTree) :: targs) => TypeApply(fn, targ :: targs.map(_.asInstanceOf[TypeTree]))
           case (fn, args) => Apply(fn, args.map(_.asInstanceOf[Term]))
         }
-        Some(call.changeOwner(meth))
+        val guarded = call.tpe.widen.asType match {
+          case '[t] => '{ Cycles.guard[t](${ This(cls).asExprOf[AnyRef] }, ${ Expr(meth.name) })(${ call.asExprOf[t] }) }.asTerm
+        }
+        Some(guarded.changeOwner(meth))
       })
     }
     val instance = Typed(Apply(Select(New(TypeIdent(cls)), cls.primaryConstructor), Nil), TypeTree.of[A])

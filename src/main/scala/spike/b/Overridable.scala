@@ -68,3 +68,25 @@ private def layer[A, S <: Self[A]](parent: S => A, child: Override[A]): S => A =
     lazy val upper: A = parent(s)
     def self: A = s.self
   })
+
+// Generated members run through `guard`, so a dependency cycle (a member asked for again while it is
+// still being computed on this thread) fails with the path instead of a lazy val waiting on itself.
+object Cycles {
+  private val inProgress = ThreadLocal.withInitial(() => scala.collection.mutable.ArrayBuffer.empty[(AnyRef, String)])
+
+  def guard[T](layer: AnyRef, member: String)(compute: => T): T = {
+    val stack = inProgress.get
+    val start = stack.indexWhere((l, m) => (l eq layer) && m == member)
+    if start >= 0 then {
+      // A member forwarded through several layers shows up once per layer; show it once.
+      val path = (stack.drop(start).map(_._2) :+ member).foldRight(List.empty[String]) {
+        case (m, next :: rest) if m == next => next :: rest
+        case (m, rest) => m :: rest
+      }
+      throw new IllegalStateException(s"cyclic dependency: ${path.mkString(" -> ")}")
+    }
+    stack += ((layer, member))
+    try compute
+    finally stack.remove(stack.length - 1)
+  }
+}
